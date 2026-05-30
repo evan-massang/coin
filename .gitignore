@@ -1,0 +1,20 @@
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.key
+wallet.json
+burner*.json
+
+# Node
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# Local data caches
+data/seen-tokens.json
+
+# OS
+Thumbs.db
+.DS_Store
