@@ -14,6 +14,12 @@ export interface SignalRecord {
   reasons: string[];
   flags: string[];
   caps: string[];
+  riskTier?: string;
+  suggestedRiskPct?: number;
+  maxPositionSol?: number;
+  marketWeather?: string;
+  sourceAgreement?: number;
+  redFlags?: string[];
   priceAtAlert?: number;
   price5m?: number;
   price15m?: number;
@@ -40,8 +46,10 @@ export class SignalsRepo {
   insert(d: Decision, priceAtAlert?: number): number {
     const info = this.db
       .prepare(
-        `INSERT INTO signals(mint, symbol, at, verdict, conviction, scores, reasons, flags, caps, price_at_alert)
-         VALUES (@mint, @symbol, @at, @verdict, @conviction, @scores, @reasons, @flags, @caps, @price)`,
+        `INSERT INTO signals(mint, symbol, at, verdict, conviction, scores, reasons, flags, caps, price_at_alert,
+            risk_tier, suggested_risk_pct, max_position_sol, market_weather, source_agreement, red_flags)
+         VALUES (@mint, @symbol, @at, @verdict, @conviction, @scores, @reasons, @flags, @caps, @price,
+            @riskTier, @suggestedRiskPct, @maxPositionSol, @marketWeather, @sourceAgreement, @redFlags)`,
       )
       .run({
         mint: d.mint,
@@ -54,6 +62,12 @@ export class SignalsRepo {
         flags: JSON.stringify(d.flags),
         caps: JSON.stringify(d.caps),
         price: priceAtAlert ?? null,
+        riskTier: d.riskTier ?? null,
+        suggestedRiskPct: d.suggestedRiskPct ?? null,
+        maxPositionSol: d.maxPositionSol ?? null,
+        marketWeather: d.marketWeather ?? null,
+        sourceAgreement: d.sourceAgreement ?? null,
+        redFlags: d.redFlags ? JSON.stringify(d.redFlags) : null,
       });
     return Number(info.lastInsertRowid);
   }
@@ -152,6 +166,12 @@ function rowToSignal(r: Record<string, unknown>): SignalRecord {
     reasons: parseJsonArray(r.reasons),
     flags: parseJsonArray(r.flags),
     caps: parseJsonArray(r.caps),
+    riskTier: (r.risk_tier as string) ?? undefined,
+    suggestedRiskPct: (r.suggested_risk_pct as number) ?? undefined,
+    maxPositionSol: (r.max_position_sol as number) ?? undefined,
+    marketWeather: (r.market_weather as string) ?? undefined,
+    sourceAgreement: (r.source_agreement as number) ?? undefined,
+    redFlags: parseJsonArray(r.red_flags),
     priceAtAlert: (r.price_at_alert as number) ?? undefined,
     price5m: (r.price_5m as number) ?? undefined,
     price15m: (r.price_15m as number) ?? undefined,

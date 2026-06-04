@@ -20,6 +20,7 @@ import { HypeScorer } from "../hype/HypeScorer.js";
 import { fetchSocialScore, heuristicSocial } from "../sources/lunarcrush.js";
 import { decide } from "../scoring/decisionCaps.js";
 import { thresholdsFromSettings } from "../scoring/thresholds.js";
+import { computeRisk } from "../risk/microfishRisk.js";
 import { makeConnection } from "../sources/solanaRpc.js";
 import { fetchAuthorities } from "../checks/authorities.js";
 import { fetchHolderConcentration } from "../checks/holderConcentration.js";
@@ -239,6 +240,27 @@ export class EntryPipeline {
       flags,
       at: now,
     });
+    // MicroFish dynamic risk sizing (advisory / paper-only).
+    const s = this.svc.settings.all();
+    const risk = computeRisk({
+      verdict: decision.verdict,
+      conviction: decision.conviction,
+      scores,
+      safetyPass: stage1.pass,
+      unknownCount: stage1.unknownCount,
+      honeypot: tracked.rugcheck?.honeypot,
+      liquidityUsd: tracked.rugcheck?.totalLiquidityUsd,
+      minLiquidityUsd: s.minLiquidityUsd,
+      baseRiskPct: s.baseRiskPct,
+      maxRiskPct: s.maxRiskPct,
+      minRiskPct: s.minRiskPct,
+      maxPositionSol: s.paperMaxPositionSol,
+    });
+    decision.riskTier = risk.riskTier;
+    decision.suggestedRiskPct = risk.suggestedRiskPct;
+    decision.maxPositionSol = risk.maxPositionSol;
+    decision.redFlags = flags.slice(0, 5);
+
     tracked.lastDecision = decision;
     metrics.inc(`scored_${decision.verdict}`);
 

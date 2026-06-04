@@ -4,6 +4,7 @@ import { PaperWallet } from "./paperWallet.js";
 import type { PositionManager } from "../engine/positionManager.js";
 import { createPaperPositionManager } from "./paperPositionManager.js";
 import { sizePaperBuy } from "./paperRiskManager.js";
+import { sizeFromRiskPct } from "../risk/riskSizing.js";
 import { defaultExitPlan } from "../engine/exitEngine.js";
 import { fetchDexSnapshot } from "../sources/dexscreener.js";
 import { getSolUsd } from "../sources/coingecko.js";
@@ -70,30 +71,39 @@ export class PaperTrader {
 
     const snap = await this.price(decision.mint);
     if (!snap?.priceUsd) return; // can't price → skip
-    const sizing = sizePaperBuy({
-      verdict: decision.verdict,
-      balanceSol,
-      maxPositionSol: s.paperMaxPositionSol,
-      riskPerTradePct: s.paperRiskPerTradePct,
-      safetyPass: true, // a BUY verdict already cleared the safety gate
-      organicScore: decision.scores.organic,
-      minOrganicScore: s.minOrganicScore,
-      lateEntryRisk: decision.scores.lateEntryRisk,
-      maxLateEntryRisk: s.maxLateEntryRisk,
-      liquidityUsd: snap.liquidityUsd,
-      minLiquidityUsd: s.minLiquidityUsd,
-    });
-    if (!sizing.buy) return;
+
+    // Prefer MicroFish's dynamic size when available; else the fixed rules.
+    let sizeSol: number;
+    if (s.riskMode === "microfish" && decision.suggestedRiskPct !== undefined) {
+      sizeSol = sizeFromRiskPct(decision.suggestedRiskPct, balanceSol, decision.maxPositionSol ?? s.paperMaxPositionSol);
+      if (sizeSol <= 0) return; // MicroFish sized it to zero (risk gate)
+    } else {
+      const sizing = sizePaperBuy({
+        verdict: decision.verdict,
+        balanceSol,
+        maxPositionSol: s.paperMaxPositionSol,
+        riskPerTradePct: s.paperRiskPerTradePct,
+        safetyPass: true, // a BUY verdict already cleared the safety gate
+        organicScore: decision.scores.organic,
+        minOrganicScore: s.minOrganicScore,
+        lateEntryRisk: decision.scores.lateEntryRisk,
+        maxLateEntryRisk: s.maxLateEntryRisk,
+        liquidityUsd: snap.liquidityUsd,
+        minLiquidityUsd: s.minLiquidityUsd,
+      });
+      if (!sizing.buy) return;
+      sizeSol = sizing.sizeSol;
+    }
 
     const solUsd = await getSolUsd();
-    const fill = simulateBuy(snap.priceUsd, solUsd, sizing.sizeSol, s.paperSlippagePct);
+    const fill = simulateBuy(snap.priceUsd, solUsd, sizeSol, s.paperSlippagePct);
     if (fill.tokenAmount <= 0) return;
-    if (!this.wallet.debit(sizing.sizeSol)) return;
+    if (!this.wallet.debit(sizeSol)) return;
 
     const now = Date.now();
     const priceSol = fill.effPriceUsd / solUsd;
     const res = this.positions.applyActivity(
-      { mint: decision.mint, side: "buy", tokenAmount: fill.tokenAmount, solAmount: sizing.sizeSol, priceSol, at: now, signature: "paper" },
+      { mint: decision.mint, side: "buy", tokenAmount: fill.tokenAmount, solAmount: sizeSol, priceSol, at: now, signature: "paper" },
       { symbol: decision.symbol, solUsd },
     );
     // Install the real exit ladder on a freshly opened paper position.
@@ -105,14 +115,14 @@ export class PaperTrader {
       mint: decision.mint,
       side: "buy",
       priceUsd: fill.effPriceUsd,
-      solAmount: sizing.sizeSol,
+      solAmount: sizeSol,
       tokenAmount: fill.tokenAmount,
       realizedPnlSol: 0,
       remainingTokenAmount: res.position?.tokenAmount ?? fill.tokenAmount,
       reason: decision.verdict,
       at: now,
     });
-    log.info(`paper: bought ${decision.symbol ?? decision.mint.slice(0, 8)} for ${sizing.sizeSol.toFixed(3)} SOL`);
+    log.info(`paper: bought ${decision.symbol ?? decision.mint.slice(0, 8)} for ${sizeSol.toFixed(3)} SOL`);
     this.svc.hub.broadcast("paper", { action: "buy", mint: decision.mint });
   }
 

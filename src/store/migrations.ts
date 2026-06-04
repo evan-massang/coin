@@ -203,6 +203,17 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    up: /* sql */ `
+      ALTER TABLE signals ADD COLUMN risk_tier TEXT;
+      ALTER TABLE signals ADD COLUMN suggested_risk_pct REAL;
+      ALTER TABLE signals ADD COLUMN max_position_sol REAL;
+      ALTER TABLE signals ADD COLUMN market_weather TEXT;
+      ALTER TABLE signals ADD COLUMN source_agreement REAL;
+      ALTER TABLE signals ADD COLUMN red_flags TEXT;
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

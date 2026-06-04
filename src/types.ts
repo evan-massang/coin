@@ -150,6 +150,13 @@ export interface Decision {
   flags: string[];
   /** Which caps fired, for transparency (e.g. "organic<45 ⇒ cap 49"). */
   caps: string[];
+  // ── MicroFish risk sizing (advisory / paper-only; Phase 2) ──
+  riskTier?: "NONE" | "TINY" | "LOW" | "MEDIUM" | "HIGH";
+  suggestedRiskPct?: number;
+  maxPositionSol?: number;
+  marketWeather?: "RISK_ON" | "NEUTRAL" | "RISK_OFF";
+  sourceAgreement?: number;
+  redFlags?: string[];
   at: number;
 }
 
@@ -172,6 +179,12 @@ export interface Alert {
   reasons: string[];
   flags: string[];
   links: AlertLinks;
+  riskTier?: "NONE" | "TINY" | "LOW" | "MEDIUM" | "HIGH";
+  suggestedRiskPct?: number;
+  maxPositionSol?: number;
+  marketWeather?: "RISK_ON" | "NEUTRAL" | "RISK_OFF";
+  sourceAgreement?: number;
+  redFlags?: string[];
   at: number;
 }
 

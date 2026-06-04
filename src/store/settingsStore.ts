@@ -37,6 +37,14 @@ export const SettingsSchema = z.object({
   /** Assumed slippage + fee on paper fills, for realism. */
   paperSlippagePct: z.number().min(0).max(100).default(2),
 
+  // ── MicroFish dynamic risk sizing (advisory / paper-only) ──
+  riskMode: z.enum(["microfish", "fixed"]).default("microfish"),
+  baseRiskPct: z.number().min(0).max(100).default(1),
+  maxRiskPct: z.number().min(0).max(100).default(2),
+  minRiskPct: z.number().min(0).max(100).default(0.1),
+  riskOffMultiplier: z.number().min(0).max(1).default(0.35),
+  sourceConflictMultiplier: z.number().min(0).max(1).default(0.5),
+
   // ── Learning ──
   learningMode: z.enum(["manual", "auto"]).default("manual"),
   /** Auto-tune rail: max % change to any threshold per day. */
