@@ -1,23 +1,23 @@
 import type { Connection } from "@solana/web3.js";
 import type { Services } from "../services.js";
 import type { PumpPortalClient } from "../sources/pumpPortal.js";
-import type { NewToken, Decision, SafetyResult, ScoreBreakdown, TradeEvent } from "../types.js";
+import type { NewToken, Decision, SafetyResult, ScoreBreakdown, TradeEvent, HypeResult } from "../types.js";
 import { emptyScores } from "../types.js";
 import { SeenCache } from "../util/seenCache.js";
 import { RateLimiter } from "../util/rateLimiter.js";
 import { metrics } from "../util/metrics.js";
+import { withTimeout } from "../util/withTimeout.js";
 import { log } from "../util/logger.js";
 import { TokenStateMachine, type TrackedToken } from "./stateMachine.js";
 import { evaluateStage0, evaluateStage1, type Stage0Inputs } from "./safetyGate.js";
-import { computeOrganicScore } from "./organicVolume.js";
-import { computeMomentum } from "./momentum.js";
-import { computeGraduation, progressFromMcapSol } from "./graduation.js";
 import { lateEntryRisk } from "../scoring/lateEntry.js";
 import { analyzeBundle } from "../checks/bundleInsider.js";
-import { computeDevReputation } from "../checks/devReputation.js";
-import { computeSmartMoney } from "./smartMoney.js";
 import { HypeScorer } from "../hype/HypeScorer.js";
-import { fetchSocialScore, heuristicSocial } from "../sources/lunarcrush.js";
+import { runAgents, scoreOf } from "../agents/coordinator.js";
+import { SCORE_AGENTS } from "../agents/scoreAgents.js";
+import type { OrganicResult } from "./organicVolume.js";
+import type { MomentumResult } from "./momentum.js";
+import type { GraduationResult } from "./graduation.js";
 import { decide } from "../scoring/decisionCaps.js";
 import { thresholdsFromSettings } from "../scoring/thresholds.js";
 import { computeRisk } from "../risk/microfishRisk.js";
@@ -165,69 +165,73 @@ export class EntryPipeline {
     tracked.phase = "SCORED"; // claim immediately so scorePass doesn't double-fire
     const { token } = tracked;
 
-    const organic = computeOrganicScore(trades);
-    const mom = computeMomentum(trades, now);
-
     const mcaps = trades.map((t) => t.marketCapSol).filter((x): x is number => typeof x === "number");
     const firstMcap = mcaps[0];
     const lastMcap = mcaps[mcaps.length - 1];
-    const progress = progressFromMcapSol(lastMcap);
-    const spanMin = Math.max((now - tracked.firstSeenAt) / 60_000, 0.1);
-    const fillVel = firstMcap && lastMcap && firstMcap > 0 ? (progress - progressFromMcapSol(firstMcap)) / spanMin : 0;
-    const grad = computeGraduation(progress, fillVel);
-
     const priceGainPct = firstMcap && lastMcap && firstMcap > 0 ? (lastMcap / firstMcap - 1) * 100 : 0;
-    const late = lateEntryRisk({
-      priceGainPctSinceFirstSeen: priceGainPct,
-      bondingCurveProgress: progress,
-      buyerVelocityTrend: mom.buyerVelocityTrend,
-      pullbackSeen: detectPullback(mcaps),
-    });
 
-    // Stage-1 safety from observed behaviour.
     const bundle = analyzeBundle(trades);
     const devSold = token.creator
       ? trades.some((t) => t.trader === token.creator && t.side === "sell")
       : undefined;
+    const smartWallets = new Map<string, number>();
+    for (const w of this.svc.wallets.byKind("copy")) smartWallets.set(w.address, w.score?.score ?? 50);
+
+    // Phase 3: run the scoring facets as concurrent agents (the coordinator
+    // never throws; a slow/failed agent degrades to a neutral unknown).
+    const results = await runAgents(SCORE_AGENTS, {
+      token,
+      trades,
+      now,
+      firstSeenAt: tracked.firstSeenAt,
+      marketCapsSol: mcaps,
+      rugcheck: tracked.rugcheck,
+      devSold,
+      smartWallets,
+      hype: (t) => this.hypeScorer.score(t),
+    });
+    const organicData = results.get("organic")?.data as OrganicResult | undefined;
+    const momData = results.get("momentum")?.data as MomentumResult | undefined;
+    const gradData = results.get("graduation")?.data as GraduationResult | undefined;
+    const hypeData = results.get("hype")?.data as HypeResult | undefined;
+
     const stage1 = evaluateStage1(tracked.stage0!, {
       devWalletSold: devSold,
-      freshWalletRatio: organic.freshWalletRatio,
+      freshWalletRatio: organicData?.freshWalletRatio,
       bundleScore: bundle.bundleScore,
     });
     tracked.stage1 = stage1;
 
-    // Advanced modules (Phase 6).
-    const devRep = computeDevReputation({ devSold });
-    const smartWallets = new Map<string, number>();
-    for (const w of this.svc.wallets.byKind("copy")) smartWallets.set(w.address, w.score?.score ?? 50);
-    const smart = computeSmartMoney(trades, smartWallets);
-    const hype = await this.hypeScorer.score({ mint: token.mint, name: token.name, symbol: token.symbol });
-    const social = await this.socialFor(token.symbol, hype.tags, hype.isRevival);
+    const late = lateEntryRisk({
+      priceGainPctSinceFirstSeen: priceGainPct,
+      bondingCurveProgress: gradData?.progress ?? 0,
+      buyerVelocityTrend: momData?.buyerVelocityTrend ?? 0,
+      pullbackSeen: detectPullback(mcaps),
+    });
 
     const scores: ScoreBreakdown = {
       safety: stage1.score,
-      organic: organic.score,
-      momentum: mom.score,
-      graduation: grad.score,
-      devReputation: devRep.score,
-      smartMoney: smart.score,
-      social: social.score,
-      hype: hype.score, // AI narrative — confirmation only (small weight)
+      organic: scoreOf(results, "organic"),
+      momentum: scoreOf(results, "momentum"),
+      graduation: scoreOf(results, "graduation"),
+      devReputation: scoreOf(results, "devReputation"),
+      smartMoney: scoreOf(results, "smartMoney"),
+      social: scoreOf(results, "social"),
+      hype: scoreOf(results, "hype"), // AI narrative — confirmation only (small weight)
       lateEntryRisk: late.risk,
     };
 
     const reasons = [
-      ...mom.reasons.slice(0, 2),
-      ...organic.reasons.slice(0, 1),
-      ...grad.reasons.slice(0, 1),
-      ...(hype.tags.length || hype.isRevival ? [`narrative: ${hype.rationale}`] : []),
-      ...smart.reasons.filter((r) => r.includes("bought")),
+      ...(momData?.reasons ?? []).slice(0, 2),
+      ...(organicData?.reasons ?? []).slice(0, 1),
+      ...(gradData?.reasons ?? []).slice(0, 1),
+      ...(hypeData && (hypeData.tags.length || hypeData.isRevival) ? [`narrative: ${hypeData.rationale}`] : []),
       ...late.reasons.slice(0, 1),
     ];
-    const flags = [...organic.flags];
+    const flags = [...(organicData?.flags ?? [])];
     if (bundle.detected) flags.push("bundle");
     if (devSold) flags.push("dev-sold");
-    if (hype.isRevival) flags.push("revival");
+    if (hypeData?.isRevival) flags.push("revival");
 
     const decision = decide({
       mint: token.mint,
@@ -273,19 +277,6 @@ export class EntryPipeline {
     if (decision.verdict !== "BUY_SMALL" && decision.verdict !== "BUY_STRONG") {
       this.pump.unwatchToken(token.mint);
     }
-  }
-
-  private async socialFor(
-    symbol: string | undefined,
-    tags: string[],
-    isRevival: boolean,
-  ): Promise<{ score: number }> {
-    const key = this.svc.settings.get("lunarcrushApiKey");
-    if (key && symbol) {
-      const live = await fetchSocialScore(symbol, key).catch(() => undefined);
-      if (live) return live;
-    }
-    return heuristicSocial(tags, isRevival);
   }
 
   /** Best-effort USD price for the journal (rate-limited; may be undefined). */
@@ -360,11 +351,4 @@ function detectPullback(mcaps: number[]): boolean {
     if (peak > 0 && (peak - m) / peak >= 0.15) return true; // ≥15% dip from peak
   }
   return false;
-}
-
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
-  ]);
 }
