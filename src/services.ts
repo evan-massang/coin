@@ -10,6 +10,7 @@ import { WalletsRepo } from "./store/repositories/walletsRepo.js";
 import { CreatorHistoryRepo } from "./store/repositories/creatorHistoryRepo.js";
 import { FingerprintRepo } from "./store/repositories/fingerprintRepo.js";
 import { WalletClusterRepo } from "./store/repositories/walletClusterRepo.js";
+import { EventRecorder } from "./replay/eventRecorder.js";
 import { WsHub } from "./dashboard/websocket.js";
 import { RugcheckCache } from "./sources/rugcheckCache.js";
 import { AlertDispatcher } from "./alerts/dispatcher.js";
@@ -43,6 +44,7 @@ export interface Services {
   creatorHistory: CreatorHistoryRepo;
   fingerprints: FingerprintRepo;
   walletCluster: WalletClusterRepo;
+  events: EventRecorder;
   hub: WsHub;
   rugcheck: RugcheckCache;
   dispatcher: AlertDispatcher;
@@ -62,6 +64,7 @@ export function createServices(db: DB = getDb()): Services {
   const creatorHistory = new CreatorHistoryRepo(db);
   const fingerprints = new FingerprintRepo(db);
   const walletCluster = new WalletClusterRepo(db);
+  const events = new EventRecorder(db);
   const hub = new WsHub();
   const rugcheck = new RugcheckCache();
 
@@ -87,6 +90,7 @@ export function createServices(db: DB = getDb()): Services {
     creatorHistory,
     fingerprints,
     walletCluster,
+    events,
     hub,
     rugcheck,
     dispatcher,

@@ -248,6 +248,24 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 4,
+    up: /* sql */ `
+      CREATE TABLE IF NOT EXISTS replay_events (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        mint             TEXT NOT NULL,
+        at               INTEGER NOT NULL,
+        verdict          TEXT NOT NULL,
+        scores           TEXT NOT NULL,
+        safety_pass      INTEGER NOT NULL,
+        unknown_count    INTEGER NOT NULL,
+        max_gain_pct     REAL,
+        max_drawdown_pct REAL,
+        hold_ms          INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_replay_at ON replay_events(at);
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

@@ -112,6 +112,30 @@ export class OutcomeTracker {
       holdMs: now - s.at,
       source: "signal",
     });
+
+    // Record a replay event (Phase 6) for deterministic strategy backtests.
+    this.svc.events.record({
+      mint: s.mint,
+      at: s.at,
+      verdict: s.verdict,
+      scores: s.scores,
+      safetyPass: s.scores.safety > 0,
+      unknownCount: s.flags?.includes("safety-unknowns") ? 2 : 0,
+      maxGainPct,
+      maxDrawdownPct,
+      holdMs: now - s.at,
+    });
+
+    // Close the scam-memory feedback loop (Phase 5): classify the outcome and
+    // update the deployer history + token fingerprint.
+    const outcome: "rug" | "winner" | undefined =
+      maxGainPct >= 100 ? "winner" : maxDrawdownPct >= 80 ? "rug" : undefined;
+    if (outcome) {
+      const creator = this.svc.tokens.get(s.mint)?.creator;
+      if (creator) this.svc.creatorHistory.recordOutcome(creator, outcome);
+      this.svc.fingerprints.markOutcome(s.mint, outcome);
+    }
+
     this.peaks.delete(id);
   }
 }
