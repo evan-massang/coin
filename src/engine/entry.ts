@@ -15,6 +15,8 @@ import { analyzeBundle } from "../checks/bundleInsider.js";
 import { HypeScorer } from "../hype/HypeScorer.js";
 import { runAgents, scoreOf } from "../agents/coordinator.js";
 import { SCORE_AGENTS } from "../agents/scoreAgents.js";
+import { fetchMarketWeather } from "../agents/marketWeather.js";
+import { computeSourceAgreement } from "../agents/sourceAgreement.js";
 import type { OrganicResult } from "./organicVolume.js";
 import type { MomentumResult } from "./momentum.js";
 import type { GraduationResult } from "./graduation.js";
@@ -244,8 +246,23 @@ export class EntryPipeline {
       flags,
       at: now,
     });
-    // MicroFish dynamic risk sizing (advisory / paper-only).
+    // Phase 4: market weather (macro + the engine's own win rate) + source
+    // agreement (do independent signals corroborate or conflict?).
     const s = this.svc.settings.all();
+    const weather = await fetchMarketWeather(() => {
+      const st = this.svc.signals.stats();
+      return { winRate: st.winRate, samples: st.total };
+    }, s.riskOffMultiplier);
+    const agreement = computeSourceAgreement({
+      rugcheckClean: tracked.rugcheck ? !tracked.rugcheck.highRisk && tracked.rugcheck.riskLevel !== "danger" : undefined,
+      bundleBad: bundle.detected,
+      liquidityHealthy: (tracked.rugcheck?.totalLiquidityUsd ?? 0) >= s.minLiquidityUsd,
+      holderBad: tracked.rugcheck?.topHolderPct !== undefined ? tracked.rugcheck.topHolderPct > s.maxTopHolderPct : false,
+      momentumStrong: scores.momentum >= 70,
+      sourceConflictMultiplier: s.sourceConflictMultiplier,
+    });
+
+    // MicroFish dynamic risk sizing (advisory / paper-only).
     const risk = computeRisk({
       verdict: decision.verdict,
       conviction: decision.conviction,
@@ -255,6 +272,8 @@ export class EntryPipeline {
       honeypot: tracked.rugcheck?.honeypot,
       liquidityUsd: tracked.rugcheck?.totalLiquidityUsd,
       minLiquidityUsd: s.minLiquidityUsd,
+      marketWeatherMultiplier: weather.multiplier,
+      sourceAgreementMultiplier: agreement.multiplier,
       baseRiskPct: s.baseRiskPct,
       maxRiskPct: s.maxRiskPct,
       minRiskPct: s.minRiskPct,
@@ -263,7 +282,9 @@ export class EntryPipeline {
     decision.riskTier = risk.riskTier;
     decision.suggestedRiskPct = risk.suggestedRiskPct;
     decision.maxPositionSol = risk.maxPositionSol;
-    decision.redFlags = flags.slice(0, 5);
+    decision.marketWeather = weather.weather;
+    decision.sourceAgreement = agreement.score;
+    decision.redFlags = [...flags, ...agreement.conflicts].slice(0, 5);
 
     tracked.lastDecision = decision;
     metrics.inc(`scored_${decision.verdict}`);
