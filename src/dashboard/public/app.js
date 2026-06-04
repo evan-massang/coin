@@ -61,8 +61,17 @@ function scoreChips(s) {
   ];
   return items.map(([k, v]) => `<span class="score">${k} <b>${Math.round(v ?? 0)}</b></span>`).join("");
 }
+function riskChips(a) {
+  const out = [];
+  if (a.riskTier) out.push(`<span class="score">risk <b>${a.riskTier}</b>${a.suggestedRiskPct ? " " + a.suggestedRiskPct.toFixed(2) + "%" : ""}</span>`);
+  if (a.maxPositionSol != null) out.push(`<span class="score">max <b>${fmtNum(a.maxPositionSol, 2)}</b> SOL</span>`);
+  if (a.marketWeather) out.push(`<span class="score">mkt <b>${a.marketWeather}</b></span>`);
+  if (a.sourceAgreement != null) out.push(`<span class="score">agree <b>${Math.round(a.sourceAgreement)}</b></span>`);
+  return out.join("");
+}
 function signalCard(a) {
   const links = a.links || {};
+  const reds = a.redFlags && a.redFlags.length ? a.redFlags : a.flags;
   return `<div class="card l-${a.kind}">
     <div class="card-top">
       <div><span class="sym">${esc(a.symbol ? "$" + a.symbol : a.name || "?")}</span>
@@ -70,13 +79,15 @@ function signalCard(a) {
       <span class="verdict v-${a.kind}">${a.kind} · ${Math.round(a.conviction)}</span>
     </div>
     <div class="scores">${scoreChips(a.scores || {})}</div>
-    <div class="reasons">${(a.reasons || []).slice(0, 3).map(esc).join(" · ") || "—"}</div>
-    ${(a.flags || []).length ? `<div class="flags">${a.flags.map((f) => `<span class="flag">${esc(f)}</span>`).join("")}</div>` : ""}
+    ${riskChips(a) ? `<div class="scores">${riskChips(a)}</div>` : ""}
+    <div class="reasons">${(a.reasons || []).slice(0, 5).map(esc).join(" · ") || "—"}</div>
+    ${(reds || []).length ? `<div class="flags">${reds.slice(0, 5).map((f) => `<span class="flag">${esc(f)}</span>`).join("")}</div>` : ""}
     <div class="links">
       <a href="${links.phantom}" target="_blank" rel="noopener">Phantom</a>
       <a href="${links.jupiter}" target="_blank" rel="noopener">Jupiter</a>
       <a href="${links.dexscreener}" target="_blank" rel="noopener">DexScreener</a>
       <a href="${links.rugcheck}" target="_blank" rel="noopener">RugCheck</a>
+      ${links.solscan ? `<a href="${links.solscan}" target="_blank" rel="noopener">Solscan</a>` : ""}
     </div>
   </div>`;
 }
@@ -230,6 +241,36 @@ $("#learning-mode").addEventListener("click", async (e) => {
   LOADERS.learning();
 });
 
+// ── AI Computer ──────────────────────────────────────────────────────────────
+LOADERS.aicomputer = async () => {
+  const rows = await api("/ai-computer/audit");
+  $("#ai-audit tbody").innerHTML = (rows || []).map((e) => `<tr>
+    <td>${fmtTime(e.at)}</td><td>${esc(e.actionType)}</td>
+    <td class="mono" style="max-width:280px;overflow:hidden;text-overflow:ellipsis">${esc(e.url || "")}</td>
+    <td>${e.allowed ? "✓" : "<span class='neg'>blocked</span>"}</td><td>${esc(e.reason || "")}</td></tr>`).join("");
+};
+$("#ai-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const mint = new FormData(e.target).get("mint");
+  $("#ai-result").textContent = "queued…";
+  const r = await api("/ai-computer/task", { method: "POST", body: { mint } });
+  if (!r.ok) { $("#ai-result").textContent = `error: ${r.error}`; return; }
+  $("#ai-result").textContent = `running (task ${r.taskId})…`;
+  // Poll the result a few times.
+  for (let i = 0; i < 12; i++) {
+    await new Promise((res) => setTimeout(res, 2000));
+    const rr = await api(`/ai-computer/result/${r.taskId}`);
+    if (rr.ok && rr.result) {
+      const c = rr.result.council;
+      $("#ai-result").textContent = c ? `council: ${c.recommendation} (${c.score}) — ${c.rationale}` : "done (council off — add Anthropic key)";
+      LOADERS.aicomputer();
+      return;
+    }
+  }
+  $("#ai-result").textContent = "done (see audit log)";
+  LOADERS.aicomputer();
+});
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 const SETTINGS_FORM = [
   { legend: "Wallet (read-only — public address only, never a seed phrase)", fields: [
@@ -253,6 +294,12 @@ const SETTINGS_FORM = [
     { k: "paperStartingBalanceSol", label: "Starting balance (SOL)", type: "number" },
     { k: "paperMaxPositionSol", label: "Max position size (SOL)", type: "number" },
     { k: "paperRiskPerTradePct", label: "Risk per trade %", type: "number" },
+  ]},
+  { legend: "Risk sizing (MicroFish — advisory / paper only)", fields: [
+    { k: "riskMode", label: "Mode", type: "select", options: ["microfish", "fixed"] },
+    { k: "baseRiskPct", label: "Base risk %", type: "number" },
+    { k: "maxRiskPct", label: "Max risk %", type: "number" },
+    { k: "minRiskPct", label: "Min risk %", type: "number" },
   ]},
   { legend: "Learning", fields: [
     { k: "learningMode", label: "Mode", type: "select", options: ["manual", "auto"] },

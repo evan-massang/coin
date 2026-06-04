@@ -266,6 +266,24 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_replay_at ON replay_events(at);
     `,
   },
+  {
+    version: 5,
+    up: /* sql */ `
+      CREATE TABLE IF NOT EXISTS ai_audit_log (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        at              INTEGER NOT NULL,
+        task_id         TEXT,
+        action_type     TEXT NOT NULL,
+        url             TEXT,
+        selector        TEXT,
+        allowed         INTEGER NOT NULL,
+        reason          TEXT,
+        screenshot_path TEXT,
+        approved        INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_audit_at ON ai_audit_log(at);
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

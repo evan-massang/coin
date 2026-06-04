@@ -167,6 +167,7 @@ export interface AlertLinks {
   jupiter: string;
   dexscreener: string;
   rugcheck: string;
+  solscan: string;
 }
 
 export interface Alert {

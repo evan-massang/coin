@@ -10,6 +10,7 @@ import { coreRoutes } from "./routes.js";
 import { settingsRoutes } from "./settingsRoutes.js";
 import { paperRoutes } from "./routes.paper.js";
 import { learningRoutes } from "./routes.learning.js";
+import { aiComputerRoutes } from "./routes.aiComputer.js";
 
 function resolvePublicDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +35,7 @@ export async function startServer(svc: Services): Promise<StartedServer> {
   app.use("/api", settingsRoutes(svc));
   app.use("/api", paperRoutes(svc));
   app.use("/api", learningRoutes(svc));
+  app.use("/api", aiComputerRoutes(svc));
 
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
 

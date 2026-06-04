@@ -7,6 +7,7 @@ export function buildLinks(mint: string): AlertLinks {
     jupiter: `https://jup.ag/swap/SOL-${mint}`,
     dexscreener: `https://dexscreener.com/solana/${mint}`,
     rugcheck: `https://rugcheck.xyz/tokens/${mint}`,
+    solscan: `https://solscan.io/token/${mint}`,
   };
 }
 
