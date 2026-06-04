@@ -64,6 +64,11 @@ export class EntryPipeline {
   private readonly hooks: EntryHooks;
   private readonly blacklist = new Set<string>();
   private readonly buffers = new Map<string, TradeEvent[]>();
+  // Bound concurrent token-trade subscriptions — the free PumpPortal feed drops
+  // the trade stream when over-subscribed. Survivors over the cap still score on
+  // their seeded launch data.
+  private readonly maxWatched = 50;
+  private readonly watched = new Set<string>();
   private readonly rpcLimiter: RateLimiter;
   private readonly dexLimiter = new RateLimiter(2);
   private readonly hypeScorer: HypeScorer;
@@ -103,9 +108,15 @@ export class EntryPipeline {
 
   private prune(): void {
     this.sm.prune();
-    // Drop buffers for tokens we no longer track.
+    // Drop buffers + free watch slots for tokens we no longer track.
     for (const mint of this.buffers.keys()) {
       if (!this.sm.has(mint)) this.buffers.delete(mint);
+    }
+    for (const mint of this.watched) {
+      if (!this.sm.has(mint)) {
+        this.watched.delete(mint);
+        this.pump.unwatchToken(mint);
+      }
     }
   }
 
@@ -151,9 +162,27 @@ export class EntryPipeline {
 
     tracked.phase = "OBSERVING";
     tracked.observeUntil = now + this.observeMs;
-    this.buffers.set(token.mint, []);
+    // Seed the buffer with the creator's initial buy (it rides in the "create"
+    // event, not the trade stream) so momentum/organic/graduation have launch
+    // data even for quiet tokens.
+    const seed: TradeEvent[] = [];
+    if (token.initialBuySol && token.initialBuySol > 0) {
+      seed.push({
+        mint: token.mint,
+        trader: token.creator ?? "creator",
+        side: "buy",
+        solAmount: token.initialBuySol,
+        marketCapSol: token.marketCapSol,
+        at: now,
+      });
+    }
+    this.buffers.set(token.mint, seed);
     metrics.inc("survivors");
-    this.pump.watchToken(token.mint);
+    // Only subscribe to the live trade stream if under the cap.
+    if (this.watched.size < this.maxWatched) {
+      this.watched.add(token.mint);
+      this.pump.watchToken(token.mint);
+    }
   }
 
   /** Periodic scoring of OBSERVING survivors. */
@@ -315,10 +344,10 @@ export class EntryPipeline {
     this.svc.dispatcher.dispatch(decision, { priceAtAlert: priceUsd });
     this.hooks.onDecision?.(decision, tracked);
 
-    // Resource bound: stop metered trade stream for non-BUY outcomes. BUY
-    // survivors stay subscribed for the exit engine (Phase 5).
+    // Resource bound: stop metered trade stream for non-BUY outcomes (freeing a
+    // subscription slot). BUY survivors stay subscribed for the exit engine.
     if (decision.verdict !== "BUY_SMALL" && decision.verdict !== "BUY_STRONG") {
-      this.pump.unwatchToken(token.mint);
+      if (this.watched.delete(token.mint)) this.pump.unwatchToken(token.mint);
     }
   }
 
