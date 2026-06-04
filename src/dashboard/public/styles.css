@@ -130,6 +130,31 @@ canvas { display: block; max-width: 100%; }
 .btn.danger { background: transparent; color: var(--red); border: 1px solid var(--red); }
 .cfgrow { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
+/* ── live signal tape ── */
+.tape { max-height: 280px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; background: #f6f2e6; }
+.tape-empty { padding: 18px; color: var(--muted); font-size: 16px; }
+.tape-row { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-bottom: 1px dotted var(--line-2); font-size: 16px; }
+.tape-row:hover { background: #efe9d6; }
+.chip { font-family: var(--pixel); font-size: 7px; padding: 4px 6px; border-radius: 3px; color: #fff; white-space: nowrap; }
+.tape-sym { font-weight: bold; min-width: 64px; }
+.tape-sc { color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tape-links a { font-size: 13px; margin-left: 7px; }
+
+/* ── funnel ── */
+.fn-row { margin: 8px 0; }
+.fn-head { display: flex; justify-content: space-between; font-size: 15px; color: var(--muted); text-transform: uppercase; }
+.fn-head b { color: var(--ink); font-size: 18px; }
+.fn-bar { height: 14px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 3px; overflow: hidden; margin-top: 3px; }
+.fn-bar i { display: block; height: 100%; }
+
+/* ── weather / health ── */
+.wx-state { font-family: var(--pixel); font-size: 16px; padding: 12px; border-radius: 5px; text-align: center; margin-bottom: 10px; border: 2px solid; }
+.wx-RISK_ON { color: var(--green); border-color: var(--green); background: #e9f2e4; }
+.wx-RISK_OFF { color: var(--red); border-color: var(--red); background: #f5e6e3; }
+.wx-NEUTRAL { color: var(--gold); border-color: var(--gold); background: #f7f0e1; }
+.wxline { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted var(--line-2); font-size: 16px; }
+.wxline span { color: var(--muted); text-transform: uppercase; }
+
 #toasts { position: fixed; right: 16px; bottom: 56px; display: flex; flex-direction: column; gap: 8px; z-index: 1100; }
 .toast { background: var(--paper); border: 1px solid var(--ink); border-left: 4px solid var(--green); border-radius: 4px; padding: 9px 12px; min-width: 220px; font-size: 16px; box-shadow: 3px 3px 0 rgba(0,0,0,0.15); }
 .toast.SELL_EXIT_NOW { border-left-color: var(--red); }
