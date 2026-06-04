@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MIROFISH RISK ENGINE</title>
+    <title>MIROFISH INTELLIGENCE</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
@@ -14,96 +14,105 @@
       <!-- ── header ── -->
       <header class="topbar">
         <div class="tb-brand">
-          <div class="tb-title">◎ MIROFISH RISK ENGINE</div>
-          <div class="tb-sub">MEME COIN INTELLIGENCE · LIVE SCANNER · READ-ONLY</div>
+          <div class="tb-title">◎ MIROFISH INTELLIGENCE</div>
+          <div class="tb-sub">EVIDENCE-DRIVEN MEME COIN INTELLIGENCE · OBSERVE → EVIDENCE → DECISION · READ-ONLY</div>
         </div>
-        <div class="tb-scan"><span class="dot-live"></span> LIVE SCANNING <b id="ls-timer">00:00:00</b></div>
+        <div class="tb-scan"><span class="dot-live"></span> OBSERVING <b id="ls-timer">00:00:00</b></div>
         <div class="tb-right">
           <div class="tb-clock"><span id="t-clock">--:--:--</span> · <span class="muted">UTC</span></div>
           <div class="tb-sys">SYSTEM <span id="sys" class="green">● ONLINE</span> · <a class="cfg" id="open-config">⚙ CONFIG</a></div>
         </div>
       </header>
 
-      <!-- ── stat tiles ── -->
+      <!-- ── ENGINE STATE — what is the engine doing right now ── -->
       <section class="tiles">
-        <div class="tile"><div class="t-k">TOKENS SCANNED</div><div class="t-v green" id="tile-scanned">0</div><div class="t-d" id="td-scanned">↑ 0 today</div><canvas class="spark" id="sp-scanned" height="26"></canvas></div>
-        <div class="tile"><div class="t-k">WINNERS FOUND</div><div class="t-v green" id="tile-winners">0</div><div class="t-d" id="td-winners">↑ 0 today</div><canvas class="spark" id="sp-winners" height="26"></canvas></div>
-        <div class="tile"><div class="t-k">RUGS AVOIDED</div><div class="t-v red" id="tile-rugs">0</div><div class="t-d" id="td-rugs">↑ 0 today</div><canvas class="spark" id="sp-rugs" height="26"></canvas></div>
-        <div class="tile"><div class="t-k">BUY SIGNALS</div><div class="t-v gold" id="tile-early">0</div><div class="t-d" id="td-early">↑ 0 today</div><canvas class="spark" id="sp-early" height="26"></canvas></div>
+        <div class="tile state-observing"><div class="t-k">OBSERVING</div><div class="t-v" id="es-observing">0</div><div class="t-d">tokens under watch</div></div>
+        <div class="tile state-ready"><div class="t-k">DECISION READY</div><div class="t-v green" id="es-ready">0</div><div class="t-d">enough evidence to call</div></div>
+        <div class="tile state-conv"><div class="t-k">HIGH CONVICTION</div><div class="t-v gold" id="es-conv">0</div><div class="t-d">recent · strong belief</div></div>
+        <div class="tile state-risk"><div class="t-k">HIGH RISK</div><div class="t-v red" id="es-risk">0</div><div class="t-d">recent · bear &gt; bull</div></div>
       </section>
 
       <!-- ── main grid ── -->
       <section class="maingrid">
         <div class="leftcol">
-          <!-- relationship graph -->
+          <!-- investigation graph -->
           <div class="panel">
-            <div class="panel-head"><span class="tag">● NETWORK</span><h2>Relationship Graph · wallet &amp; entity</h2><span class="muted small" id="graph-stats">nodes 0</span></div>
+            <div class="panel-head"><span class="tag">● INVESTIGATE</span><h2>Investigation Graph · <span id="graph-token" class="muted">select a token</span></h2><span class="muted small" id="graph-stats">nodes 0</span></div>
             <div class="graph-wrap">
               <div class="legend col" id="legend"></div>
               <canvas id="graph" width="560" height="320"></canvas>
             </div>
+            <div class="graph-focus muted small" id="graph-focus">click a node to inspect the relationship</div>
           </div>
-          <!-- live token feed -->
+          <!-- live token table -->
           <div class="panel">
-            <div class="panel-head"><span class="tag">▤ LIVE</span><h2>Live Token Feed</h2><span class="muted small" id="feed-rate">0/min</span></div>
+            <div class="panel-head"><span class="tag">▤ LIVE</span><h2>Observed Tokens</h2><span class="muted small" id="feed-rate">0/min</span></div>
             <table class="feed">
-              <thead><tr><th>TOKEN</th><th>AGE</th><th>BUY PRESSURE</th><th>ORGANIC</th><th>RISK</th><th>CONF</th><th>STATUS</th></tr></thead>
+              <thead><tr><th>TOKEN</th><th>AGE</th><th>STATE</th><th>CONVICTION</th><th>EVIDENCE</th><th>VERDICT</th></tr></thead>
               <tbody id="feed"></tbody>
             </table>
+            <div class="muted small feed-hint">▸ click a row to investigate why the engine believes — or doubts — it</div>
           </div>
         </div>
 
         <div class="rightcol">
-          <!-- best call -->
-          <div class="panel bestcall">
-            <div class="panel-head"><span class="tag gold">★ BEST CALL</span><h2>today</h2></div>
-            <div class="bc-token" id="bc-token">—</div>
-            <div class="bc-grid">
-              <div><div class="s-k">PEAK GAIN</div><div class="bc-gain" id="bc-gain">—</div></div>
-              <div><div class="s-k">CONFIDENCE</div><div class="s-v" id="bc-conf">—</div></div>
-            </div>
-            <div class="bc-detect" id="bc-detect">—</div>
-          </div>
-          <!-- market weather -->
+          <!-- observation status -->
           <div class="panel">
-            <div class="panel-head"><span class="tag">⛅ WEATHER</span><h2>market regime</h2></div>
-            <div class="wx-state wx-NEUTRAL" id="wx-state">—</div>
+            <div class="panel-head"><span class="tag">◉ OBSERVATION</span><h2>status · <span id="obs-token" class="muted">—</span></h2></div>
+            <div class="obs-grid">
+              <div class="obs-cell"><div class="s-k">STATE</div><div class="obs-state" id="obs-state">—</div></div>
+              <div class="obs-cell"><div class="s-k">CONFIDENCE</div><div class="s-v" id="obs-conf">—</div></div>
+              <div class="obs-cell"><div class="s-k">AGE</div><div class="s-v" id="obs-age">—</div></div>
+              <div class="obs-cell"><div class="s-k">CONVICTION</div><div class="s-v" id="obs-tier">—</div></div>
+            </div>
+            <div class="sec-label">DATA COVERAGE</div>
+            <div class="cover-bar"><i id="obs-cover-i"></i></div>
+            <div class="muted small" id="obs-cover-t">how much of the picture we actually have</div>
+          </div>
+          <!-- why this token -->
+          <div class="panel why">
+            <div class="panel-head"><span class="tag gold">★ WHY</span><h2 id="why-token">Why this token?</h2></div>
+            <div class="why-verdict" id="why-verdict">—</div>
+            <ul class="why-list" id="why-list"><li class="muted">select a token to see the engine's reasoning</li></ul>
+            <div class="why-links" id="why-links"></div>
+          </div>
+          <!-- market regime -->
+          <div class="panel">
+            <div class="panel-head"><span class="tag">🌐 REGIME</span><h2>market regime</h2></div>
+            <div class="rg-state rg-NEUTRAL" id="rg-state">—</div>
+            <div class="muted small" id="rg-reason" style="margin:8px 0">—</div>
+            <div class="wxline"><span>regime confidence</span><b id="rg-conf">—</b></div>
             <div class="wxline"><span>SOL 24h</span><b id="wx-sol">—</b></div>
             <div class="wxline"><span>BTC 24h</span><b id="wx-btc">—</b></div>
-            <div class="wxline"><span>meme activity</span><b id="wx-meme">—</b></div>
-            <div class="wxline"><span>new tokens seen</span><b id="wx-new">—</b></div>
+            <div class="wxline"><span>weather</span><b id="wx-state">—</b></div>
           </div>
-          <!-- source agreement -->
+          <!-- ai notes (shrunk) -->
           <div class="panel">
-            <div class="panel-head"><span class="tag">◇ SOURCES</span><h2>agreement</h2></div>
-            <div id="src-list"></div>
-            <div class="sec-label">AGREEMENT SCORE</div>
-            <div class="bignum sm green" id="src-score">—</div>
-          </div>
-          <!-- ai council -->
-          <div class="panel">
-            <div class="panel-head"><span class="tag">⚖ COUNCIL</span><h2>AI opinion</h2></div>
-            <div id="council-list"><div class="muted small">add an Anthropic key + run AI research</div></div>
+            <div class="panel-head"><span class="tag dark">AI NOTES</span><h2 class="small">research · confirmation only</h2></div>
+            <div id="ai-notes"><div class="muted small">add an Anthropic key + run AI research in CONFIG → never overrides safety</div></div>
           </div>
         </div>
       </section>
 
-      <!-- ── bottom grid ── -->
+      <!-- ── evidence row: the "why believe / why doubt" ── -->
       <section class="botgrid">
         <div class="panel">
-          <div class="panel-head"><span class="tag dark">STATS</span><h2>MicroFish · all-time</h2></div>
-          <div id="ms-list"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><span class="tag">📈 ACCURACY</span><h2>Confidence Curve</h2><span class="muted small" id="cv-today">—</span></div>
-          <canvas id="curve" width="360" height="200"></canvas>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><span class="tag">▦ EVIDENCE</span><h2 id="ev-token">current token</h2></div>
-          <div class="ev-wrap">
-            <div id="ev-list" class="ev-list"></div>
-            <div class="ev-gauge"><canvas id="ev-gauge" width="120" height="120"></canvas><div class="ev-overall" id="ev-overall">—</div><div class="s-k">OVERALL</div></div>
+          <div class="panel-head"><span class="tag" style="color:var(--green-2);border-color:var(--green-2)">▲ EVIDENCE FEED</span><h2 id="ev-token">bull &amp; bear</h2></div>
+          <div class="ev-cols">
+            <div class="ev-side"><div class="sec-label" style="color:var(--green-2)">BULL ▲ <span id="ev-bull-n">0</span></div><ul class="ev-bullets" id="ev-bull"></ul></div>
+            <div class="ev-side"><div class="sec-label" style="color:var(--red)">BEAR ▼ <span id="ev-bear-n">0</span></div><ul class="ev-bullets" id="ev-bear"></ul></div>
           </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">⚖ CONFLICT</span><h2>bull vs bear</h2></div>
+          <div class="cf-balance"><div class="cf-bull" id="cf-bull"></div><div class="cf-bear" id="cf-bear"></div></div>
+          <div class="cf-nums"><span class="green" id="cf-bull-n">▲ 0</span><span class="cf-net" id="cf-net">—</span><span class="red" id="cf-bear-n">0 ▼</span></div>
+          <div class="sec-label">WEIGHTED LEAN</div>
+          <div class="muted small" id="cf-verdict">no token selected</div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">⏱ TIMELINE</span><h2>observation</h2></div>
+          <ul class="tl-list" id="tl-list"><li class="muted small">select a token</li></ul>
         </div>
       </section>
 
@@ -114,7 +123,7 @@
       <div class="overlay-box">
         <div class="panel-head"><span class="tag dark">CONFIG</span><h2>Settings</h2><a class="cfg" id="close-config">✕ CLOSE</a></div>
         <form class="cfgform" id="cfgform"></form>
-        <div class="panel-head"><span class="tag">AI COMPUTER</span><h2>read-only research → feeds Council</h2></div>
+        <div class="panel-head"><span class="tag">AI COMPUTER</span><h2>read-only research → feeds AI Notes</h2></div>
         <form class="cfgform" id="aiform">
           <label class="full">token mint <input type="text" name="mint" placeholder="paste a mint"/></label>
           <div class="cfgrow"><button class="btn" type="submit">Run research</button><span class="muted" id="ai-out"></span></div>

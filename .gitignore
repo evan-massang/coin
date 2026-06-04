@@ -22,6 +22,9 @@ data/*.sqlite*
 data/seen-tokens.json
 ruvector.db
 
+# Local UI-verification harness output (scripts/seed-and-serve.ts + scripts/shoot.mjs)
+.verify-data/
+
 # OS
 Thumbs.db
 .DS_Store

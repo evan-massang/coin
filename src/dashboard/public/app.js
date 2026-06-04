@@ -1,23 +1,39 @@
 "use strict";
-// MICROFISH RISK ENGINE — terminal layout, real data, dependency-free canvas.
-// Cream/pixel art style kept; layout mirrors the reference. No fabricated data:
-// panels only show what the engine actually produces.
+// MIROFISH INTELLIGENCE — operator console. Answers four questions:
+//   What is happening?  → engine-state tiles + observed-token table
+//   Why?                → Why-this-token + Evidence Feed (bull/bear) + graph
+//   How confident?      → Observation Status (coverage/confidence/age/state)
+//   What evidence?      → Evidence Feed + Conflict + Observation Timeline
+// Cream/pixel art style kept. No fabricated data — panels render only what the
+// engine actually produced (Graph Intelligence Layer). Read-only; never signs.
 
 const $ = (s, r = document) => r.querySelector(s);
 const api = async (p, o) =>
   (await fetch(`/api${p}`, { headers: { "Content-Type": "application/json" }, ...o, body: o && o.body ? JSON.stringify(o.body) : undefined })).json();
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const sign = (n, d = 2) => (n >= 0 ? "+" : "") + Number(n || 0).toFixed(d);
 const pctS = (n) => (n >= 0 ? "+" : "") + Math.round(n || 0) + "%";
 const commas = (n) => Number(n || 0).toLocaleString();
-const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
 const COL = { paper: "#f6f2e6", ink: "#21241d", green: "#2f8f4e", greenB: "#3aa85c", red: "#cf4b41", gold: "#c98a2b", blue: "#3f6fb0", muted: "#9a9886", line: "#d4ccb4" };
 const VC = { BUY_STRONG: COL.greenB, BUY_SMALL: COL.green, WATCH_ONLY: COL.muted, TOO_LATE: COL.gold, AVOID: COL.red, SELL_TRIM: COL.gold, SELL_EXIT_NOW: COL.red };
+const ET = { TOKEN: COL.ink, DEV: COL.blue, BUYERS: COL.green, CLUSTER: COL.gold, SMART_MONEY: COL.blue, NARRATIVE: COL.gold, KNOWN_RUG: COL.red, UNVERIFIED: COL.muted };
+const ENT_DESC = {
+  TOKEN: "the token itself — the thing under investigation",
+  DEV: "deployer wallet — did the creator dump on holders?",
+  BUYERS: "organic buyers — real demand vs wash trading",
+  CLUSTER: "buyer cluster — checked for coordinated / bundled entry",
+  SMART_MONEY: "tracked smart-money wallets entered this token",
+  NARRATIVE: "narrative / social trend strength",
+  KNOWN_RUG: "matches a known rug fingerprint or bundle pattern",
+  UNVERIFIED: "data the engine could not verify (unknowns)",
+};
 const vcol = (v) => VC[v] || COL.muted;
 const isBuy = (v) => v === "BUY_SMALL" || v === "BUY_STRONG";
 
-const STATE = { signals: [], status: null, stats: null, paper: null, market: null, council: null, bootAt: Date.now() };
+const STATE = {
+  signals: [], status: null, market: null, engine: null, council: null,
+  selectedMint: null, selected: null, focusEntity: null, bootAt: Date.now(),
+};
 
 // ── clock + uptime ──
 function tick() {
@@ -29,222 +45,243 @@ function tick() {
 }
 setInterval(tick, 1000); tick();
 
-// ── canvas helpers ──
 function fit(cv, cssH) {
   const dpr = window.devicePixelRatio || 1, w = cv.clientWidth || 300;
   cv.style.height = cssH + "px"; cv.width = Math.max(1, Math.floor(w * dpr)); cv.height = Math.floor(cssH * dpr);
   const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, cssH);
   return { ctx, w, h: cssH };
 }
-function sparkline(id, vals, color) {
-  const cv = $(id); if (!cv) return; const { ctx, w, h } = fit(cv, 26);
-  if (vals.length < 2) return;
-  const max = Math.max(...vals, 1), min = Math.min(...vals, 0);
-  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
-  vals.forEach((v, i) => { const x = (i / (vals.length - 1)) * w, y = h - 2 - ((v - min) / (max - min || 1)) * (h - 4); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-  ctx.stroke();
-}
+function ageMs(ms) { const s = Math.floor(ms / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`; }
+function ageStr(at) { return ageMs(Date.now() - at); }
 
-// ── data ──
-const counters = () => (STATE.status && STATE.status.metrics && STATE.status.metrics.counters) || {};
-const timings = () => (STATE.status && STATE.status.metrics && STATE.status.metrics.timings) || {};
-const byV = () => (STATE.stats && STATE.stats.byVerdict) || {};
-const buySignals = () => (byV().BUY_SMALL || 0) + (byV().BUY_STRONG || 0);
-const resolved = () => STATE.signals.filter((s) => s.maxGainPct != null);
 const topSignal = () => { const b = STATE.signals.filter((s) => isBuy(s.verdict)); return (b.length ? b : STATE.signals).slice().sort((a, z) => z.conviction - a.conviction)[0]; };
 
 async function loadAll() {
-  const [status, stats, paper, signals, market, council] = await Promise.all([
-    api("/status").catch(() => null), api("/journal/stats").catch(() => null), api("/paper").catch(() => null),
-    api("/signals?limit=150").catch(() => []), api("/market").catch(() => null), api("/ai-computer/latest").catch(() => null),
+  const [status, signals, market, engine, council] = await Promise.all([
+    api("/status").catch(() => null),
+    api("/signals?limit=120").catch(() => []),
+    api("/market").catch(() => null),
+    api("/engine-state").catch(() => null),
+    api("/ai-computer/latest").catch(() => null),
   ]);
-  STATE.status = status; STATE.stats = stats; STATE.paper = paper; STATE.market = market; STATE.council = council;
+  STATE.status = status; STATE.market = market; STATE.engine = engine; STATE.council = council;
   STATE.signals = (signals || []).map((s) => ({ ...s, verdict: s.verdict })).reverse();
-  renderTiles(); renderBestCall(); renderWeather(); renderSources(); renderCouncil();
-  renderFeed(); renderStats(); renderEvidence(); renderAlerts(); drawCurve();
+  renderEngineState(); renderRegime(); renderAiNotes(); renderTable(); renderAlerts();
+  // Default selection = highest-conviction recent token.
+  if (!STATE.selectedMint && STATE.signals.length) selectToken((topSignal() || STATE.signals[STATE.signals.length - 1]).mint);
+  else if (STATE.selectedMint) refreshSelected();
 }
 
-// buckets a metric from recent signals into n time slots
-function buckets(pred, n = 14) {
-  const s = STATE.signals; if (!s.length) return [];
-  const per = Math.max(1, Math.ceil(s.length / n)); const out = [];
-  for (let i = 0; i < s.length; i += per) out.push(s.slice(i, i + per).filter(pred).length);
-  return out;
+// ── engine state — what the engine is doing right now ──
+function renderEngineState() {
+  const e = STATE.engine || {};
+  $("#es-observing").textContent = commas(e.observing || 0);
+  $("#es-ready").textContent = commas(e.decisionReady || 0);
+  $("#es-conv").textContent = commas(e.highConviction || 0);
+  $("#es-risk").textContent = commas(e.highRisk || 0);
 }
 
-function renderTiles() {
-  const c = counters(), st = STATE.stats || {}, co = (STATE.status && STATE.status.counts) || {};
-  const winners = resolved().filter((x) => x.maxGainPct >= 100).length;
-  const rugs = (byV().AVOID || 0);
-  $("#tile-scanned").textContent = commas(co.tokens || c.tokens_seen || 0);
-  $("#tile-winners").textContent = commas(winners);
-  $("#tile-rugs").textContent = commas(rugs);
-  $("#tile-early").textContent = commas(buySignals());
-  $("#td-scanned").textContent = `↑ ${commas(c.tokens_seen || 0)} session`;
-  $("#td-winners").textContent = `${Math.round((st.winRate || 0) * 100)}% hit ≥2x`;
-  $("#td-rugs").textContent = `↑ ${commas(c.avoided || 0)} session`;
-  $("#td-early").textContent = `↑ ${commas((c.scored_BUY_SMALL || 0) + (c.scored_BUY_STRONG || 0))} session`;
-  sparkline("#sp-scanned", buckets(() => true), COL.green);
-  sparkline("#sp-winners", buckets((x) => x.maxGainPct >= 100), COL.green);
-  sparkline("#sp-rugs", buckets((x) => x.verdict === "AVOID"), COL.red);
-  sparkline("#sp-early", buckets((x) => isBuy(x.verdict)), COL.gold);
-}
-
-function renderBestCall() {
-  let bc = null; for (const s of STATE.signals) if (s.maxGainPct != null && (!bc || s.maxGainPct > bc.maxGainPct)) bc = s;
-  if (!bc) { $("#bc-token").textContent = "—"; $("#bc-gain").textContent = "—"; $("#bc-conf").textContent = "—"; $("#bc-detect").textContent = "no resolved signals yet"; return; }
-  $("#bc-token").innerHTML = `$${esc(bc.symbol || bc.mint.slice(0, 8))} <span class="muted small">${bc.verdict}</span>`;
-  const x = 1 + bc.maxGainPct / 100;
-  $("#bc-gain").innerHTML = `${pctS(bc.maxGainPct)} <span class="muted small">${x.toFixed(1)}x</span>`;
-  $("#bc-conf").textContent = Math.round(bc.conviction) + "%";
-  $("#bc-detect").textContent = `risk ${bc.riskTier || "—"} · max drawdown ${bc.maxDrawdownPct != null ? Math.round(bc.maxDrawdownPct) + "%" : "—"}`;
-}
-
-function renderWeather() {
-  const m = STATE.market || {}, wx = m.weather || "NEUTRAL";
-  const el = $("#wx-state"); el.textContent = wx; el.className = "wx-state wx-" + wx;
+// ── market regime ──
+function renderRegime() {
+  const m = STATE.market || {}, rg = m.regime || { regime: m.weather || "NEUTRAL", confidence: 0, reasons: [] };
+  const el = $("#rg-state"); el.textContent = (rg.regime || "NEUTRAL").replace("_", " "); el.className = "rg-state rg-" + (rg.regime || "NEUTRAL");
+  $("#rg-reason").textContent = (rg.reasons || []).join(" · ") || "—";
+  $("#rg-conf").textContent = rg.confidence != null ? Math.round(rg.confidence) + "%" : "—";
   $("#wx-sol").innerHTML = m.solChange24h != null ? `<span class="${m.solChange24h >= 0 ? "green" : "red"}">${pctS(m.solChange24h)}</span>` : "—";
   $("#wx-btc").innerHTML = m.btcChange24h != null ? `<span class="${m.btcChange24h >= 0 ? "green" : "red"}">${pctS(m.btcChange24h)}</span>` : "—";
-  const rate = STATE.signals.length >= 2 ? ((STATE.signals.length / Math.max((STATE.signals[STATE.signals.length - 1].at - STATE.signals[0].at) / 60000, 1))).toFixed(1) : "0";
-  $("#wx-meme").textContent = rate + "/min";
-  $("#wx-new").textContent = commas(counters().tokens_seen || 0);
+  const wx = m.weather || "NEUTRAL";
+  $("#wx-state").innerHTML = `<span class="${wx === "RISK_ON" ? "green" : wx === "RISK_OFF" ? "red" : "gold"}">${wx}</span>`;
+  const rate = STATE.signals.length >= 2 ? (STATE.signals.length / Math.max((STATE.signals[STATE.signals.length - 1].at - STATE.signals[0].at) / 60000, 1)).toFixed(1) : "0";
   $("#feed-rate").textContent = rate + "/min";
 }
 
-function srcIcon(v) { return v >= 66 ? `<b class="ok">✓ ${v >= 80 ? "STRONG" : "GOOD"}</b>` : v >= 40 ? `<b class="warn">△ FAIR</b>` : `<b class="part">○ WEAK</b>`; }
-function renderSources() {
-  const t = topSignal(); const sc = (t && t.scores) || {};
-  const rows = [["RugCheck / Safety", sc.safety], ["Trade Flow / Organic", sc.organic], ["Momentum", sc.momentum], ["Dev Wallet", sc.devReputation], ["Smart Money", sc.smartMoney], ["Narrative", sc.hype]];
-  $("#src-list").innerHTML = rows.map(([k, v]) => `<div class="srcline"><span>${k}</span>${v != null ? srcIcon(Math.round(v)) : "<b class='muted'>—</b>"}</div>`).join("");
-  $("#src-score").textContent = t && t.sourceAgreement != null ? Math.round(t.sourceAgreement) + "%" : "—";
-}
-
-function renderCouncil() {
+// ── AI notes (shrunk; confirmation only, never overrides safety) ──
+function renderAiNotes() {
   const c = STATE.council && STATE.council.council;
-  const claude = c ? `<b class="${c.recommendation === "confirm" ? "ok" : "warn"}">${c.recommendation === "confirm" ? "BULLISH" : "CAUTION"}</b>` : `<b class="muted">off</b>`;
-  const rows = [["Claude (Haiku)", claude], ["GPT-4o", "<b class='muted'>not wired</b>"], ["Gemini", "<b class='muted'>not wired</b>"], ["Perplexity", "<b class='muted'>not wired</b>"]];
-  $("#council-list").innerHTML = rows.map(([k, v]) => `<div class="council-row"><span class="muted small">${k}</span>${v}</div>`).join("") +
-    `<div class="sec-label">CONSENSUS</div><div class="bignum sm" style="color:${c ? COL.green : COL.muted}">${c ? c.score + "%" : "—"}</div>` +
-    (c ? `<div class="muted small" style="margin-top:6px">${esc(c.rationale).slice(0, 90)}</div>` : `<div class="muted small">run AI research in CONFIG →</div>`);
+  if (!c) { $("#ai-notes").innerHTML = `<div class="muted small">add an Anthropic key + run AI research in CONFIG → never overrides safety</div>`; return; }
+  const bull = c.recommendation === "confirm";
+  $("#ai-notes").innerHTML =
+    `<div class="note-rec ${bull ? "green" : "gold"}">${bull ? "▲ BULLISH" : "△ CAUTION"} · ${c.score}%</div>` +
+    `<div class="muted small" style="margin-top:6px">${esc((c.rationale || "").slice(0, 160))}</div>` +
+    `<div class="muted small" style="margin-top:6px">research only — cannot change the safety verdict</div>`;
 }
 
-function ageStr(at) { const s = Math.floor((Date.now() - at) / 1000); return s < 60 ? `00m ${String(s).padStart(2, "0")}s` : `${String(Math.floor(s / 60)).padStart(2, "0")}m ${String(s % 60).padStart(2, "0")}s`; }
+// ── observed-token table (State / Conviction / Evidence + clickable) ──
+function stateChip(st) { return st ? `<span class="statepill st-${st}">${st.replace("_", " ")}</span>` : `<span class="muted small">—</span>`; }
+function convChip(s) {
+  const c = Math.round(s.conviction || 0), tier = s.convictionTier;
+  const col = tier === "HIGH" ? COL.green : tier === "MEDIUM" ? COL.gold : COL.muted;
+  return `<b style="color:${col}">${c}</b>${tier ? ` <span class="muted small">${tier[0]}</span>` : ""}`;
+}
+function evCell(s) {
+  const n = s.evidenceCount, bull = s.bullCount, bear = s.bearCount;
+  if (n == null && bull == null) return `<span class="muted small">—</span>`;
+  return `<span class="evcount"><span class="green">▲${bull ?? "?"}</span> <span class="red">▼${bear ?? "?"}</span></span>`;
+}
 function feedRow(s) {
-  const l = s.links || {}, mom = Math.round(s.scores.momentum), org = Math.round(s.scores.organic), risk = Math.round(s.scores.lateEntryRisk), conf = Math.round(s.conviction);
-  return `<tr>
-    <td><b>$${esc(s.symbol || s.mint.slice(0, 5))}</b>${l.dexscreener ? ` <a class="small" href="${l.dexscreener}" target="_blank" rel="noopener">↗</a>` : ""}</td>
+  const sel = s.mint === STATE.selectedMint ? " class=\"sel\"" : "";
+  return `<tr${sel} data-mint="${esc(s.mint)}">
+    <td><b>$${esc(s.symbol || s.mint.slice(0, 5))}</b></td>
     <td class="muted">${ageStr(s.at)}</td>
-    <td><span class="pressure"><i style="width:${mom}%;background:${mom >= 60 ? COL.green : mom >= 35 ? COL.gold : COL.red}"></i></span> ${mom}%</td>
-    <td style="color:${org >= 55 ? COL.green : org >= 45 ? COL.gold : COL.red}">${org}%</td>
-    <td style="color:${risk >= 60 ? COL.red : risk >= 40 ? COL.gold : COL.green}">${risk}</td>
-    <td>${conf}%</td>
+    <td>${stateChip(s.state)}</td>
+    <td>${convChip(s)}</td>
+    <td>${evCell(s)}</td>
     <td><span class="chip" style="background:${vcol(s.verdict)}">${s.verdict}</span></td>
   </tr>`;
 }
-function renderFeed() {
-  const rows = STATE.signals.slice(-14).reverse();
-  $("#feed").innerHTML = rows.length ? rows.map(feedRow).join("") : `<tr><td colspan="7" class="muted">waiting for signals…</td></tr>`;
+function renderTable() {
+  const rows = STATE.signals.slice(-16).reverse();
+  const body = $("#feed");
+  body.innerHTML = rows.length ? rows.map(feedRow).join("") : `<tr><td colspan="6" class="muted">observing — waiting for the first scored token…</td></tr>`;
+  body.querySelectorAll("tr[data-mint]").forEach((tr) => (tr.onclick = () => selectToken(tr.getAttribute("data-mint"))));
 }
 
-function renderStats() {
-  const st = STATE.stats || {}, c = counters(), co = (STATE.status && STATE.status.counts) || {};
-  const res = resolved(), buysRes = res.filter((x) => isBuy(x.verdict)), nonBuyRes = res.filter((x) => !isBuy(x.verdict));
-  const falseBuy = buysRes.length ? (buysRes.filter((x) => x.maxGainPct < 10).length / buysRes.length) * 100 : 0;
-  const missed = nonBuyRes.length ? (nonBuyRes.filter((x) => x.maxGainPct >= 100).length / nonBuyRes.length) * 100 : 0;
-  const avgConf = STATE.signals.length ? STATE.signals.reduce((a, s) => a + s.conviction, 0) / STATE.signals.length : 0;
-  const avoidRate = (st.total || 0) ? ((byV().AVOID || 0) / st.total) * 100 : 0;
-  const p50 = timings().stage0_ms ? Math.round(timings().stage0_ms.p50) : null;
-  const rows = [
-    ["Win Rate (≥2x)", Math.round((st.winRate || 0) * 100) + "%", COL.green],
-    ["Avoid Rate", Math.round(avoidRate) + "%", COL.ink],
-    ["False Buy", falseBuy.toFixed(1) + "%", COL.red],
-    ["Missed (≥2x in AVOID/WATCH)", missed.toFixed(1) + "%", COL.gold],
-    ["Avg Confidence", Math.round(avgConf) + "%", COL.ink],
-    ["Avg Stage-0", p50 != null ? p50 + "ms" : "—", COL.ink],
-    ["Signals Logged", commas(st.total || 0), COL.ink],
-    ["Tokens Scanned", commas(co.tokens || 0), COL.ink],
-  ];
-  $("#ms-list").innerHTML = rows.map(([k, v, c2]) => `<div class="msline"><span>${k}</span><b style="color:${c2}">${v}</b></div>`).join("");
+// ── selection: fetch full graph intelligence for one token ──
+async function selectToken(mint) {
+  STATE.selectedMint = mint; STATE.focusEntity = null;
+  renderTable();
+  const intel = await api(`/token/${mint}`).catch(() => null);
+  if (intel && !intel.error) { STATE.selected = intel; }
+  else {
+    // No full intel (evicted / not yet scored) — build a minimal view from the signal summary.
+    const s = STATE.signals.find((x) => x.mint === mint);
+    STATE.selected = s ? minimalIntel(s) : null;
+  }
+  renderSelected();
+}
+async function refreshSelected() {
+  if (!STATE.selectedMint) return;
+  const intel = await api(`/token/${STATE.selectedMint}`).catch(() => null);
+  if (intel && !intel.error) { STATE.selected = intel; renderSelected(); }
+}
+function minimalIntel(s) {
+  return {
+    mint: s.mint, symbol: s.symbol, state: s.state, coverage: s.coverage, confidence: Math.round(s.conviction || 0),
+    convictionTier: s.convictionTier, observationAgeMs: Date.now() - s.at, verdict: s.verdict,
+    entities: [], bull: [], bear: [], bullScore: 0, bearScore: 0,
+    why: (s.reasons || []).slice(0, 5), timeline: [], links: s.links, _minimal: true,
+  };
 }
 
-function evColor(v) { return v >= 66 ? COL.green : v >= 40 ? COL.gold : COL.red; }
-function renderEvidence() {
-  const t = topSignal(); const sc = (t && t.scores) || {};
-  $("#ev-token").textContent = t ? "$" + (t.symbol || t.mint.slice(0, 6)) : "current token";
-  const rows = [["Safety (RugCheck)", sc.safety], ["Organic / Trade Flow", sc.organic], ["Momentum", sc.momentum], ["Dev Wallet", sc.devReputation], ["Smart Money", sc.smartMoney], ["Narrative", sc.hype]];
-  $("#ev-list").innerHTML = rows.map(([k, v]) => { const n = Math.round(v || 0); return `<div class="ev-row"><div class="evk"><span>${k}</span><span>${n}%</span></div><div class="ev-bar"><i style="width:${n}%;background:${evColor(n)}"></i></div></div>`; }).join("");
-  const overall = t ? Math.round(t.conviction) : 0;
-  $("#ev-overall").textContent = overall + "%";
-  drawGauge(overall);
-}
-function drawGauge(p) {
-  const cv = $("#ev-gauge"); const { ctx } = fit(cv, 120); const cx = 60, cy = 64, r = 46;
-  ctx.lineWidth = 9; ctx.strokeStyle = COL.line; ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 2.25); ctx.stroke();
-  ctx.strokeStyle = evColor(p); ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 0.75 + (Math.PI * 1.5) * (p / 100)); ctx.stroke();
+function renderSelected() {
+  const i = STATE.selected;
+  const sig = STATE.selectedMint && STATE.signals.find((x) => x.mint === STATE.selectedMint);
+  const verdict = (i && i.verdict) || (sig && sig.verdict) || "—";
+  const tok = i ? "$" + esc(i.symbol || i.mint.slice(0, 6)) : "—";
+
+  // observation status
+  $("#obs-token").textContent = i ? tok.replace(/<[^>]+>/g, "") : "—";
+  const stEl = $("#obs-state");
+  stEl.textContent = i && i.state ? i.state.replace("_", " ") : "—";
+  stEl.className = "obs-state " + (i && i.state ? "st-" + i.state : "");
+  $("#obs-conf").textContent = i && i.confidence != null ? i.confidence + "%" : "—";
+  $("#obs-age").textContent = i ? ageMs(i.observationAgeMs || 0) : "—";
+  $("#obs-tier").innerHTML = i && i.convictionTier ? `<span style="color:${i.convictionTier === "HIGH" ? COL.green : i.convictionTier === "MEDIUM" ? COL.gold : COL.muted}">${i.convictionTier}</span>` : "—";
+  const cov = i && i.coverage != null ? i.coverage : 0;
+  $("#obs-cover-i").style.width = cov + "%";
+  $("#obs-cover-i").style.background = cov >= 60 ? COL.green : cov >= 40 ? COL.gold : COL.red;
+  $("#obs-cover-t").textContent = i && i.coverage != null ? `${cov}% of the picture observed` : "how much of the picture we actually have";
+
+  // why this token
+  $("#why-token").innerHTML = i ? `Why ${tok}?` : "Why this token?";
+  $("#why-verdict").innerHTML = i ? `<span style="color:${vcol(verdict)}">${verdict}</span>` : "—";
+  const why = (i && i.why) || [];
+  $("#why-list").innerHTML = why.length
+    ? why.map((w) => `<li>${esc(w)}</li>`).join("")
+    : `<li class="muted">${i && i._minimal ? "detail evicted — showing summary only" : "select a token to see the engine's reasoning"}</li>`;
+  $("#why-links").innerHTML = i && i.links
+    ? [["DEX", i.links.dexscreener], ["RugCheck", i.links.rugcheck], ["Solscan", i.links.solscan], ["Phantom", i.links.phantom], ["Jupiter", i.links.jupiter]]
+        .filter(([, u]) => u).map(([k, u]) => `<a href="${u}" target="_blank" rel="noopener">${k} ↗</a>`).join("")
+    : "";
+
+  // evidence feed (bull / bear)
+  const bull = (i && i.bull) || [], bear = (i && i.bear) || [];
+  $("#ev-token").textContent = i ? tok.replace(/<[^>]+>/g, "") : "bull & bear";
+  $("#ev-bull-n").textContent = bull.length; $("#ev-bear-n").textContent = bear.length;
+  $("#ev-bull").innerHTML = bull.length ? bull.map((e) => `<li class="b-bull"><span>${esc(e.label)}</span><span class="w">+${e.weight}</span></li>`).join("") : `<li class="muted small">none yet</li>`;
+  $("#ev-bear").innerHTML = bear.length ? bear.map((e) => `<li class="b-bear"><span>${esc(e.label)}</span><span class="w">${e.weight}</span></li>`).join("") : `<li class="muted small">none yet</li>`;
+
+  // conflict (bull vs bear weighted)
+  const bs = (i && i.bullScore) || 0, br = (i && i.bearScore) || 0, tot = bs + br;
+  $("#cf-bull").style.width = (tot ? (bs / tot) * 100 : 50) + "%";
+  $("#cf-bear").style.width = (tot ? (br / tot) * 100 : 50) + "%";
+  $("#cf-bull-n").textContent = `▲ ${bull.length}`;
+  $("#cf-bear-n").textContent = `${bear.length} ▼`;
+  const net = bs - br;
+  $("#cf-net").textContent = tot ? (net > 0 ? "BULL LEAN" : net < 0 ? "BEAR LEAN" : "SPLIT") : "—";
+  $("#cf-verdict").innerHTML = tot
+    ? `weighted <b style="color:${net >= 0 ? COL.green : COL.red}">${net >= 0 ? "+" : ""}${net}</b> — ${net > 8 ? "evidence supports a position" : net < -8 ? "evidence says stay away" : "conflicted — not enough edge"}`
+    : (i && i._minimal ? "detail evicted — summary only" : "no token selected");
+
+  // observation timeline
+  const tl = (i && i.timeline) || [];
+  $("#tl-list").innerHTML = tl.length
+    ? tl.map((t) => `<li class="${/⚠/.test(t.label) ? "warn" : ""}"><span class="tl-t">+${ageMs(t.atMs)}</span><br>${esc(t.label)}</li>`).join("")
+    : `<li class="muted small">${i ? "no timeline captured" : "select a token"}</li>`;
+
+  // graph label
+  $("#graph-token").textContent = i ? tok.replace(/<[^>]+>/g, "") : "select a token";
 }
 
-function renderAlerts() {
-  const recent = STATE.signals.slice(-8).reverse();
-  const segs = recent.map((s) => `${s.verdict === "AVOID" ? "🛑" : isBuy(s.verdict) ? "🟢" : "•"} $${s.symbol || s.mint.slice(0, 5)} ${s.verdict} ${Math.round(s.conviction)}`);
-  const tail = `◎ MICROFISH · READ-ONLY · NEVER SIGNS · SCANNED ${commas((STATE.status && STATE.status.counts && STATE.status.counts.tokens) || 0)}`;
-  $("#alerts").textContent = ((segs.join("   ·   ") || "scanning…") + "      " + tail + "      ").repeat(2);
-}
-
-// ── confidence / accuracy curve (rolling avg conviction) ──
-function drawCurve() {
-  const cv = $("#curve"); const { ctx, w, h } = fit(cv, 200);
-  const s = STATE.signals; if (s.length < 3) { ctx.fillStyle = COL.muted; ctx.font = "17px VT323"; ctx.fillText("accuracy builds as signals resolve…", 12, h / 2); $("#cv-today").textContent = "—"; return; }
-  const n = Math.min(24, s.length), per = Math.ceil(s.length / n), pts = [];
-  for (let i = 0; i < s.length; i += per) { const chunk = s.slice(i, i + per); pts.push(chunk.reduce((a, x) => a + x.conviction, 0) / chunk.length); }
-  const pad = 12, max = 100, min = 0;
-  const sx = (i) => pad + (i / (pts.length - 1)) * (w - pad * 2), sy = (v) => h - pad - ((v - min) / (max - min)) * (h - pad * 2);
-  ctx.strokeStyle = COL.line; ctx.setLineDash([3, 3]);[25, 50, 75].forEach((g) => { ctx.beginPath(); ctx.moveTo(0, sy(g)); ctx.lineTo(w, sy(g)); ctx.stroke(); }); ctx.setLineDash([]);
-  ctx.strokeStyle = COL.blue; ctx.lineWidth = 2; ctx.beginPath();
-  pts.forEach((v, i) => (i ? ctx.lineTo(sx(i), sy(v)) : ctx.moveTo(sx(i), sy(v)))); ctx.stroke();
-  $("#cv-today").textContent = "now " + Math.round(pts[pts.length - 1]) + "%";
-}
-
-// ── entity relationship graph (top token) ──
-let graphCv, wob = 0;
-function entitiesFor(t) {
-  if (!t) return [];
-  const f = [...(t.redFlags || []), ...(t.flags || [])].join(" ").toLowerCase();
-  const ents = [];
-  ents.push({ label: "DEV WALLET", color: COL.blue, sub: /dev-sold|dev wallet sold/.test(f) ? "sold" : "holding" });
-  ents.push({ label: "ORGANIC BUYERS", color: COL.green, sub: Math.round(t.scores.organic) + "% organic" });
-  if (t.scores.smartMoney >= 55) ents.push({ label: "SMART MONEY", color: COL.blue, sub: "tracked" });
-  if (/bundle/.test(f)) ents.push({ label: "BUNDLE / SNIPER", color: COL.red, sub: "detected" });
-  if (/rug/.test(f)) ents.push({ label: "KNOWN RUG", color: COL.red, sub: "fingerprint match" });
-  if (/safety-unknowns/.test(f)) ents.push({ label: "UNVERIFIED", color: COL.muted, sub: "unknowns" });
-  if (t.scores.momentum >= 60) ents.push({ label: "BUYER VELOCITY", color: COL.gold, sub: "rising" });
-  return ents;
-}
+// ── investigation graph (selected token's entities; clickable nodes) ──
+let graphCv; const graphNodes = []; let wob = 0;
 function drawGraph() {
-  if (!graphCv) graphCv = $("#graph");
+  if (!graphCv) { graphCv = $("#graph"); graphCv.onclick = onGraphClick; }
   const { ctx, w, h } = fit(graphCv, 320);
-  const t = topSignal();
-  const cx = w / 2, cy = h / 2; wob += 0.012;
-  const ents = entitiesFor(t);
-  $("#graph-stats").textContent = t ? `nodes ${ents.length + 1} · ${esc(t.symbol || "?")}` : "nodes 0";
-  $("#legend").innerHTML = [["TOKEN", COL.green], ["DEV", COL.blue], ["ORGANIC", COL.green], ["SMART MONEY", COL.blue], ["WHALE / VELOCITY", COL.gold], ["RUG / SNIPER", COL.red], ["UNVERIFIED", COL.muted]]
+  const i = STATE.selected;
+  const ents = (i && i.entities) || [];
+  const cx = w / 2, cy = h / 2; wob += 0.01;
+  graphNodes.length = 0;
+
+  $("#graph-stats").textContent = i ? `nodes ${ents.length} · ${esc(i.symbol || "?")}` : "nodes 0";
+  $("#legend").innerHTML = [["TOKEN", ET.TOKEN], ["DEV", ET.DEV], ["BUYERS", ET.BUYERS], ["CLUSTER", ET.CLUSTER], ["SMART MONEY", ET.SMART_MONEY], ["NARRATIVE", ET.NARRATIVE], ["RUG / SNIPER", ET.KNOWN_RUG]]
     .map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join("");
-  // edges + nodes
-  ents.forEach((e, i) => {
-    const ang = (i / ents.length) * Math.PI * 2 + wob;
-    const R = 105 + Math.sin(wob * 2 + i) * 6;
-    e.x = cx + Math.cos(ang) * R; e.y = cy + Math.sin(ang) * (R * 0.62);
-    ctx.strokeStyle = "rgba(120,120,90,0.3)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(e.x, e.y); ctx.stroke();
+
+  // non-center entities arranged around the token
+  const around = ents.filter((e) => e.type !== "TOKEN");
+  around.forEach((e, idx) => {
+    const ang = (idx / Math.max(around.length, 1)) * Math.PI * 2 + wob;
+    const R = 108 + Math.sin(wob * 2 + idx) * 5;
+    const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * (R * 0.6);
+    const col = ET[e.type] || COL.muted;
+    ctx.strokeStyle = STATE.focusEntity === e.id ? col : "rgba(120,120,90,0.3)";
+    ctx.lineWidth = STATE.focusEntity === e.id ? 2 : 1;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke();
+    graphNodes.push({ id: e.id, x, y, r: 9, ent: e });
   });
-  ents.forEach((e) => {
-    ctx.beginPath(); ctx.arc(e.x, e.y, 7, 0, 7); ctx.fillStyle = e.color; ctx.fill();
+  graphNodes.forEach(({ x, y, ent }) => {
+    const col = ET[ent.type] || COL.muted;
+    ctx.beginPath(); ctx.arc(x, y, STATE.focusEntity === ent.id ? 9 : 7, 0, 7); ctx.fillStyle = col; ctx.fill();
+    if (STATE.focusEntity === ent.id) { ctx.strokeStyle = COL.ink; ctx.lineWidth = 2; ctx.stroke(); }
     ctx.fillStyle = COL.ink; ctx.font = "13px VT323"; ctx.textAlign = "center";
-    ctx.fillText(e.label, e.x, e.y - 11); ctx.fillStyle = COL.muted; ctx.fillText(e.sub, e.x, e.y + 20);
+    ctx.fillText(ent.label, x, y - 12); ctx.fillStyle = COL.muted; ctx.fillText(ent.sub || "", x, y + 21);
   });
   // center token
-  ctx.beginPath(); ctx.arc(cx, cy, t ? 13 : 8, 0, 7); ctx.fillStyle = t ? vcol(t.verdict) : COL.muted; ctx.fill();
+  const tEnt = ents.find((e) => e.type === "TOKEN");
+  ctx.beginPath(); ctx.arc(cx, cy, i ? 14 : 8, 0, 7); ctx.fillStyle = i ? vcol((i && i.verdict) || "WATCH_ONLY") : COL.muted; ctx.fill();
   ctx.strokeStyle = COL.ink; ctx.lineWidth = 2; ctx.stroke();
-  if (t) { ctx.fillStyle = COL.ink; ctx.font = "15px VT323"; ctx.textAlign = "center"; ctx.fillText("$" + (t.symbol || t.mint.slice(0, 5)), cx, cy + 32); }
+  graphNodes.push({ id: "__token__", x: cx, y: cy, r: 16, ent: tEnt || { type: "TOKEN", label: i ? "$" + (i.symbol || "") : "", sub: (i && i.verdict) || "" } });
+  if (i) { ctx.fillStyle = COL.ink; ctx.font = "15px VT323"; ctx.textAlign = "center"; ctx.fillText("$" + (i.symbol || i.mint.slice(0, 5)), cx, cy + 34); }
   requestAnimationFrame(drawGraph);
+}
+function onGraphClick(ev) {
+  const rect = graphCv.getBoundingClientRect();
+  const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+  let hit = null, best = 18;
+  for (const n of graphNodes) { const d = Math.hypot(mx - n.x, my - n.y); if (d < best) { best = d; hit = n; } }
+  if (!hit) return;
+  if (hit.id === "__token__") { STATE.focusEntity = null; $("#graph-focus").textContent = "the token under investigation — see Why & Evidence panels"; return; }
+  STATE.focusEntity = hit.id;
+  const e = hit.ent;
+  $("#graph-focus").innerHTML = `<b style="color:${ET[e.type] || COL.muted}">${esc(e.label)}</b> · ${esc(e.sub || "")} — ${esc(ENT_DESC[e.type] || "")}`;
+}
+
+// ── ticker ──
+function renderAlerts() {
+  const recent = STATE.signals.slice(-8).reverse();
+  const segs = recent.map((s) => `${s.verdict === "AVOID" ? "🛑" : isBuy(s.verdict) ? "🟢" : "•"} $${s.symbol || s.mint.slice(0, 5)} ${s.verdict} ${Math.round(s.conviction)}${s.state ? " [" + s.state.replace("_", " ") + "]" : ""}`);
+  const tail = `◎ MIROFISH · EVIDENCE-DRIVEN · READ-ONLY · NEVER SIGNS · OBSERVED ${commas((STATE.status && STATE.status.counts && STATE.status.counts.tokens) || 0)}`;
+  $("#alerts").textContent = ((segs.join("   ·   ") || "observing…") + "      " + tail + "      ").repeat(2);
 }
 
 // ── websocket ──
@@ -262,9 +299,12 @@ function connectWs() {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === "alert") {
       const a = m.data; a.verdict = a.kind || a.verdict;
-      STATE.signals.push(a); if (STATE.signals.length > 250) STATE.signals.shift();
-      renderFeed(); renderAlerts();
+      STATE.signals.push(a); if (STATE.signals.length > 200) STATE.signals.shift();
+      renderTable(); renderAlerts();
+      if (a.mint === STATE.selectedMint) refreshSelected();
       if (isBuy(a.verdict) || a.verdict === "SELL_TRIM" || a.verdict === "SELL_EXIT_NOW") toast(a);
+    } else if (m.type === "paper" && m.data && m.data.reset) {
+      loadAll();
     }
   };
 }
@@ -278,7 +318,7 @@ const CFG = [
   { k: "minConviction", label: "min conviction notify", t: "number" },
   { k: "riskMode", label: "risk mode", t: "select", opts: ["microfish", "fixed"] },
   { k: "heliusApiKey", label: "helius key", t: "secret" },
-  { k: "anthropicApiKey", label: "anthropic key (council)", t: "secret" },
+  { k: "anthropicApiKey", label: "anthropic key (AI notes)", t: "secret" },
   { k: "rugcheckApiKey", label: "rugcheck key", t: "secret" },
 ];
 async function openConfig() {
@@ -304,10 +344,10 @@ async function saveConfig() {
 }
 $("#open-config").onclick = openConfig;
 $("#close-config").onclick = () => $("#config").classList.remove("open");
-$("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — check Council shortly` : `error: ${r.error}`; };
+$("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — check AI Notes shortly` : `error: ${r.error}`; };
 
 (async function boot() {
   await loadAll(); drawGraph(); connectWs();
-  setInterval(loadAll, 12000);
-  window.addEventListener("resize", () => { renderTiles(); drawCurve(); renderEvidence(); });
+  setInterval(loadAll, 10000);
+  window.addEventListener("resize", () => { renderTable(); });
 })();
