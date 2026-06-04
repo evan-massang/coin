@@ -3,128 +3,120 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Meme Signal Engine</title>
+    <title>MEMEFISH · Signal Terminal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">
-        <span class="logo">◎</span>
-        <span>Meme Signal Engine</span>
-        <span class="readonly" title="This app never holds a key, never signs, never trades.">READ-ONLY</span>
+    <div class="screen">
+      <!-- ── top ticker ───────────────────────────────────────────── -->
+      <div class="ticker-top">
+        <span>◎ SOLANA · <b class="green">LIVE</b> · 2026 · <span id="t-wallet">0x0fe9…d3a1b7</span></span>
+        <span class="badge" id="t-badge">★ #1 · MEME WHALE</span>
+        <span><span id="t-clock">--:--:--</span> · <span class="muted">UTC</span></span>
       </div>
-      <div class="status" id="status-pills">
-        <span class="pill" id="pill-ws">ws: …</span>
-        <span class="pill" id="pill-live">Live</span>
-        <span class="pill" id="pill-wallet">Wallet: off</span>
-        <span class="pill" id="pill-paper">Paper: off</span>
+
+      <!-- ── brand row ────────────────────────────────────────────── -->
+      <div class="brand-row">
+        <div class="brand">@memefish · <span class="green">MEMEFISH</span> <span class="muted">SIGNAL SCANNER</span></div>
+        <div class="brand-right">
+          <span class="ro">READ-ONLY</span>
+          <a class="cfg" id="open-config">⚙ CONFIG</a>
+        </div>
       </div>
-    </header>
 
-    <nav class="tabs" id="tabs">
-      <button class="tab active" data-tab="signals">Live Signals</button>
-      <button class="tab" data-tab="positions">Open Positions</button>
-      <button class="tab" data-tab="wallet">Wallet Observer</button>
-      <button class="tab" data-tab="journal">Journal</button>
-      <button class="tab" data-tab="paper">Paper Wallet</button>
-      <button class="tab" data-tab="backtest">Backtest</button>
-      <button class="tab" data-tab="learning">Learning</button>
-      <button class="tab" data-tab="aicomputer">AI Computer</button>
-      <button class="tab" data-tab="settings">Settings</button>
-    </nav>
-
-    <main id="main">
-      <section class="panel active" id="tab-signals">
-        <div class="panel-head"><h2>Live Signals</h2><span class="muted" id="signals-meta"></span></div>
-        <div class="cards" id="signals-list"><p class="muted">Waiting for the scanner… new tokens appear here within seconds of launch.</p></div>
+      <!-- ── hero PnL ─────────────────────────────────────────────── -->
+      <section class="hero">
+        <div class="hero-main">
+          <div class="sec-label">PAPER REALIZED PNL · SOL <span class="tag" id="hero-mode">● LIVE</span></div>
+          <div class="bignum" id="hero-pnl">+0</div>
+          <div class="hero-sub" id="hero-sub">0 signals · ALL · 0% win · 0/day</div>
+          <div class="hero-wallet" id="hero-walletline">WALLET <span class="muted">not set</span> · paper sim</div>
+          <div class="dots" id="hero-dots"></div>
+        </div>
+        <div class="hero-win">
+          <div class="sec-label gold">★ BIGGEST WIN</div>
+          <div class="win-big" id="win-big">—</div>
+          <div class="win-sub" id="win-sub">best trade</div>
+        </div>
       </section>
 
-      <section class="panel" id="tab-positions">
-        <div class="panel-head"><h2>Open Positions</h2>
-          <div class="seg" id="positions-seg">
-            <button class="seg-btn active" data-status="open">Open</button>
-            <button class="seg-btn" data-status="closed">Closed</button>
+      <!-- ── relationship graph ───────────────────────────────────── -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="tag" id="graph-tag">● SCANNING</span>
+          <h2>MEMEFISH · Relationship Graph Simulation</h2>
+          <span class="muted small" id="graph-stats">nodes 0 · edges 0</span>
+        </div>
+        <div class="graph-wrap">
+          <canvas id="graph" width="540" height="300"></canvas>
+          <div class="graph-side" id="top-panel">
+            <div class="kvline"><span>TOP SIGNAL</span><b id="tp-verdict">—</b></div>
+            <div class="kvline"><span>conviction</span><b id="tp-conv">—</b></div>
+            <div class="kvline"><span>safety</span><b id="tp-safety">—</b></div>
+            <div class="kvline"><span>momentum</span><b id="tp-mom">—</b></div>
+            <div class="kvline"><span>risk tier</span><b id="tp-risk">—</b></div>
+            <div class="tp-flag" id="tp-flag"></div>
           </div>
         </div>
-        <div class="cards" id="positions-list"></div>
+        <div class="legend" id="legend"></div>
       </section>
 
-      <section class="panel" id="tab-wallet">
-        <div class="panel-head"><h2>Wallet Observer</h2></div>
-        <div class="kv" id="wallet-info"></div>
-        <h3>Detected positions</h3>
-        <div class="cards" id="wallet-positions"></div>
-      </section>
-
-      <section class="panel" id="tab-journal">
-        <div class="panel-head"><h2>Journal</h2><span class="muted" id="journal-stats"></span></div>
-        <div class="table-wrap"><table id="journal-table"><thead><tr>
-          <th>Time</th><th>Verdict</th><th>Token</th><th>Conv</th><th>Safety</th><th>Organic</th><th>Mom</th><th>Late</th><th>Max gain</th><th>Reason</th>
-        </tr></thead><tbody></tbody></table></div>
-      </section>
-
-      <section class="panel" id="tab-paper">
-        <div class="panel-head"><h2>Paper Wallet</h2>
-          <button class="btn danger" id="paper-reset">Reset Paper Wallet</button>
+      <!-- ── signal flow candles ──────────────────────────────────── -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="tag">▣ LIVE</span>
+          <h2>Live Signal Flow</h2>
+          <span class="red small" id="flow-now">conv 0</span>
         </div>
-        <div class="kv" id="paper-stats"></div>
-        <h3>Open sim positions</h3>
-        <div class="cards" id="paper-open"></div>
-        <h3>Recent sim fills</h3>
-        <div class="table-wrap"><table id="paper-fills"><thead><tr>
-          <th>Time</th><th>Side</th><th>Token</th><th>Price</th><th>SOL</th><th>Realized</th><th>Reason</th>
-        </tr></thead><tbody></tbody></table></div>
+        <canvas id="candles" width="700" height="190"></canvas>
       </section>
 
-      <section class="panel" id="tab-backtest">
-        <div class="panel-head"><h2>Backtest</h2></div>
-        <form class="form" id="backtest-form">
-          <p class="muted">Replay journalled signals under alternative thresholds (validated before applying).</p>
-          <label>Min conviction (BUY_STRONG) <input type="number" name="minConvictionBuyStrong" min="0" max="100" /></label>
-          <label>Min organic score <input type="number" name="minOrganicScore" min="0" max="100" /></label>
-          <label>Max late-entry risk <input type="number" name="maxLateEntryRisk" min="0" max="100" /></label>
-          <button class="btn" type="submit">Run backtest</button>
-        </form>
-        <div class="table-wrap"><table id="backtest-table"><thead><tr>
-          <th>Time</th><th>Settings</th><th>Trades</th><th>Win rate</th><th>PnL (SOL)</th><th>Max DD</th><th>Best</th><th>Worst</th>
-        </tr></thead><tbody></tbody></table></div>
-      </section>
-
-      <section class="panel" id="tab-learning">
-        <div class="panel-head"><h2>Learning</h2>
-          <div class="seg" id="learning-mode">
-            <button class="seg-btn" data-mode="manual">Manual Review</button>
-            <button class="seg-btn" data-mode="auto">Auto-Tune</button>
+      <!-- ── cash flow + pnl curve ────────────────────────────────── -->
+      <section class="split">
+        <div class="panel">
+          <div class="panel-head"><span class="tag dark">CASH FLOW</span><h2>Win Stack</h2></div>
+          <div class="bignum sm green" id="cf-pnl">+0</div>
+          <div class="statgrid">
+            <div class="stat"><div class="s-k">TRADES</div><div class="s-v" id="st-trades">0</div></div>
+            <div class="stat"><div class="s-k">WIN RATE</div><div class="s-v" id="st-win">0%</div></div>
+            <div class="stat"><div class="s-k">AVG GAIN</div><div class="s-v" id="st-avg">0%</div></div>
+            <div class="stat"><div class="s-k">BEST</div><div class="s-v" id="st-best">0%</div></div>
           </div>
+          <div class="sec-label">LAST 30 SIGNALS</div>
+          <canvas id="bars" width="320" height="120"></canvas>
         </div>
-        <h3>Suggestions</h3>
-        <div class="cards" id="learning-suggestions"><p class="muted">No suggestions yet — they appear after a soak.</p></div>
-        <h3>Setting change history</h3>
-        <div class="table-wrap"><table id="learning-history"><thead><tr>
-          <th>Time</th><th>Setting</th><th>From</th><th>To</th><th>By</th><th>Note</th>
-        </tr></thead><tbody></tbody></table></div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">PnL Curve</span><h2 id="curve-window">live</h2></div>
+          <div class="statrow">
+            <div class="stat"><div class="s-k">PEAK</div><div class="s-v green" id="cv-peak">+0</div></div>
+            <div class="stat"><div class="s-k">CURRENT</div><div class="s-v" id="cv-cur">+0</div></div>
+            <div class="stat"><div class="s-k">DRAWDOWN</div><div class="s-v red" id="cv-dd">0%</div></div>
+          </div>
+          <canvas id="curve" width="320" height="210"></canvas>
+        </div>
       </section>
 
-      <section class="panel" id="tab-aicomputer">
-        <div class="panel-head"><h2>AI Computer</h2><span class="muted">Read-only research: screenshots + an evidence-only Claude second opinion. Never clicks, connects a wallet, or trades.</span></div>
-        <form class="form" id="ai-form">
-          <label>Token mint <input type="text" name="mint" placeholder="paste a mint address"/></label>
+      <!-- ── bottom marquee ───────────────────────────────────────── -->
+      <div class="ticker-bottom"><div class="marquee" id="marquee">loading…</div></div>
+    </div>
+
+    <!-- ── config overlay (settings + AI computer) ───────────────── -->
+    <div class="overlay" id="config">
+      <div class="overlay-box">
+        <div class="panel-head"><span class="tag dark">CONFIG</span><h2>Settings</h2><a class="cfg" id="close-config">✕ CLOSE</a></div>
+        <form class="cfgform" id="cfgform"></form>
+        <div class="panel-head"><span class="tag">AI COMPUTER</span><h2>read-only research</h2></div>
+        <form class="cfgform" id="aiform">
+          <label>token mint <input type="text" name="mint" placeholder="paste a mint"/></label>
           <button class="btn" type="submit">Run research</button>
-          <span class="muted" id="ai-result"></span>
+          <span class="muted" id="ai-out"></span>
         </form>
-        <h3>Action audit log</h3>
-        <div class="table-wrap"><table id="ai-audit"><thead><tr>
-          <th>Time</th><th>Action</th><th>URL</th><th>Allowed</th><th>Reason</th>
-        </tr></thead><tbody></tbody></table></div>
-      </section>
+      </div>
+    </div>
 
-      <section class="panel" id="tab-settings">
-        <div class="panel-head"><h2>Settings</h2><span class="muted" id="settings-saved"></span></div>
-        <form class="form grid" id="settings-form"></form>
-      </section>
-    </main>
-
-    <div id="toasts"></div>
     <script src="/app.js"></script>
   </body>
 </html>
