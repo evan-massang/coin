@@ -20,7 +20,7 @@ function ctx(over: Partial<RiskContext> = {}): RiskContext {
   };
 }
 
-describe("computeRisk (MicroFish)", () => {
+describe("computeRisk (MiroFish)", () => {
   it("safety fail ⇒ 0% / NONE", () => {
     const r = computeRisk(ctx({ safetyPass: false }));
     expect(r.suggestedRiskPct).toBe(0);

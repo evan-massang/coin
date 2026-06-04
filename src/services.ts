@@ -18,11 +18,21 @@ import { AlertDispatcher } from "./alerts/dispatcher.js";
 import { DesktopNotifier } from "./alerts/desktopNotifier.js";
 import { ChimePlayer } from "./alerts/sound.js";
 import { config } from "./config.js";
-import type { WalletStatus } from "./types.js";
+import type { WalletStatus, GraphIntel } from "./types.js";
+
+export interface EngineState {
+  observing: number;
+  decisionReady: number;
+  highConviction: number;
+  highRisk: number;
+}
 
 /** Mutable runtime state shared across engines + dashboard routes. */
 export interface RuntimeState {
   wallet: WalletStatus;
+  /** Latest per-token graph intelligence (recent tokens), for detail panels. */
+  intel: Map<string, GraphIntel>;
+  engineState: EngineState;
 }
 
 /**
@@ -100,6 +110,8 @@ export function createServices(db: DB = getDb()): Services {
     dispatcher,
     runtime: {
       wallet: { address: settings.get("walletAddress"), connected: false },
+      intel: new Map(),
+      engineState: { observing: 0, decisionReady: 0, highConviction: 0, highRisk: 0 },
     },
   };
 }

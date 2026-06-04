@@ -5,7 +5,7 @@ import { getMacroFromCoincap } from "../sources/coincap.js";
 // §Phase 4 market weather. Combines macro (SOL/BTC 24h) with INTERNAL paper
 // stats (the engine's own recent win rate) — internal is weighted higher once
 // there's enough data, because "is THIS engine working right now" beats the
-// broad market. RISK_OFF shrinks every position via the MicroFish multiplier.
+// broad market. RISK_OFF shrinks every position via the MiroFish multiplier.
 
 export type Weather = "RISK_ON" | "NEUTRAL" | "RISK_OFF";
 

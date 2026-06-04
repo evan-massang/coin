@@ -22,6 +22,20 @@ export function decisionToAlert(d: Decision): Alert {
     reasons: d.reasons,
     flags: d.flags,
     links: buildLinks(d.mint),
+    // MiroFish risk sizing (advisory / paper-only).
+    riskTier: d.riskTier,
+    suggestedRiskPct: d.suggestedRiskPct,
+    maxPositionSol: d.maxPositionSol,
+    marketWeather: d.marketWeather,
+    sourceAgreement: d.sourceAgreement,
+    redFlags: d.redFlags,
+    // Graph Intelligence summary — drives the operator dashboard (state, evidence).
+    state: d.state,
+    coverage: d.coverage,
+    convictionTier: d.convictionTier,
+    evidenceCount: d.evidenceCount,
+    bullCount: d.bullCount,
+    bearCount: d.bearCount,
     at: d.at,
   };
 }

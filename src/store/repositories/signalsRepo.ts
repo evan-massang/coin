@@ -20,6 +20,12 @@ export interface SignalRecord {
   marketWeather?: string;
   sourceAgreement?: number;
   redFlags?: string[];
+  state?: string;
+  coverage?: number;
+  convictionTier?: string;
+  evidenceCount?: number;
+  bullCount?: number;
+  bearCount?: number;
   priceAtAlert?: number;
   price5m?: number;
   price15m?: number;
@@ -47,9 +53,11 @@ export class SignalsRepo {
     const info = this.db
       .prepare(
         `INSERT INTO signals(mint, symbol, at, verdict, conviction, scores, reasons, flags, caps, price_at_alert,
-            risk_tier, suggested_risk_pct, max_position_sol, market_weather, source_agreement, red_flags)
+            risk_tier, suggested_risk_pct, max_position_sol, market_weather, source_agreement, red_flags,
+            state, coverage, conviction_tier, evidence_count, bull_count, bear_count)
          VALUES (@mint, @symbol, @at, @verdict, @conviction, @scores, @reasons, @flags, @caps, @price,
-            @riskTier, @suggestedRiskPct, @maxPositionSol, @marketWeather, @sourceAgreement, @redFlags)`,
+            @riskTier, @suggestedRiskPct, @maxPositionSol, @marketWeather, @sourceAgreement, @redFlags,
+            @state, @coverage, @convictionTier, @evidenceCount, @bullCount, @bearCount)`,
       )
       .run({
         mint: d.mint,
@@ -68,6 +76,12 @@ export class SignalsRepo {
         marketWeather: d.marketWeather ?? null,
         sourceAgreement: d.sourceAgreement ?? null,
         redFlags: d.redFlags ? JSON.stringify(d.redFlags) : null,
+        state: d.state ?? null,
+        coverage: d.coverage ?? null,
+        convictionTier: d.convictionTier ?? null,
+        evidenceCount: d.evidenceCount ?? null,
+        bullCount: d.bullCount ?? null,
+        bearCount: d.bearCount ?? null,
       });
     return Number(info.lastInsertRowid);
   }
@@ -172,6 +186,12 @@ function rowToSignal(r: Record<string, unknown>): SignalRecord {
     marketWeather: (r.market_weather as string) ?? undefined,
     sourceAgreement: (r.source_agreement as number) ?? undefined,
     redFlags: parseJsonArray(r.red_flags),
+    state: (r.state as string) ?? undefined,
+    coverage: (r.coverage as number) ?? undefined,
+    convictionTier: (r.conviction_tier as string) ?? undefined,
+    evidenceCount: (r.evidence_count as number) ?? undefined,
+    bullCount: (r.bull_count as number) ?? undefined,
+    bearCount: (r.bear_count as number) ?? undefined,
     priceAtAlert: (r.price_at_alert as number) ?? undefined,
     price5m: (r.price_5m as number) ?? undefined,
     price15m: (r.price_15m as number) ?? undefined,

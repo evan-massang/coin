@@ -150,13 +150,20 @@ export interface Decision {
   flags: string[];
   /** Which caps fired, for transparency (e.g. "organic<45 ⇒ cap 49"). */
   caps: string[];
-  // ── MicroFish risk sizing (advisory / paper-only; Phase 2) ──
+  // ── MiroFish risk sizing (advisory / paper-only; Phase 2) ──
   riskTier?: "NONE" | "TINY" | "LOW" | "MEDIUM" | "HIGH";
   suggestedRiskPct?: number;
   maxPositionSol?: number;
   marketWeather?: "RISK_ON" | "NEUTRAL" | "RISK_OFF";
   sourceAgreement?: number;
   redFlags?: string[];
+  // ── Graph Intelligence summary (Phase: Graph Intelligence Layer) ──
+  state?: ObservationState;
+  coverage?: number;
+  convictionTier?: ConvictionTier;
+  evidenceCount?: number;
+  bullCount?: number;
+  bearCount?: number;
   at: number;
 }
 
@@ -186,6 +193,12 @@ export interface Alert {
   marketWeather?: "RISK_ON" | "NEUTRAL" | "RISK_OFF";
   sourceAgreement?: number;
   redFlags?: string[];
+  state?: ObservationState;
+  coverage?: number;
+  convictionTier?: ConvictionTier;
+  evidenceCount?: number;
+  bullCount?: number;
+  bearCount?: number;
   at: number;
 }
 
@@ -340,6 +353,53 @@ export interface BacktestRun {
   bestTradePct: number;
   worstTradePct: number;
   avgHoldMs: number;
+}
+
+// ── Graph Intelligence Layer (Observation → Confidence → Graph → Evidence) ──
+
+export type ObservationState = "DISCOVERED" | "OBSERVING" | "MATURE" | "DECISION_READY" | "ARCHIVED";
+export type ConvictionTier = "LOW" | "MEDIUM" | "HIGH";
+export type MarketRegime = "ACCUMULATION" | "BULL_EXPANSION" | "DISTRIBUTION" | "PANIC" | "NEUTRAL";
+
+export type GraphEntityType =
+  | "TOKEN" | "DEV" | "BUYERS" | "CLUSTER" | "WHALE" | "SMART_MONEY" | "KNOWN_RUG" | "NARRATIVE" | "UNVERIFIED";
+
+export interface GraphEntity {
+  id: string;
+  type: GraphEntityType;
+  label: string;
+  sub?: string;
+}
+
+export interface EvidenceItem {
+  label: string;
+  weight: number;
+}
+
+export interface TimelineEvent {
+  atMs: number;
+  label: string;
+}
+
+/** Full per-token intelligence: why the engine believes (or doubts) a token. */
+export interface GraphIntel {
+  mint: string;
+  symbol?: string;
+  state: ObservationState;
+  /** 0..100 — how much of the data we actually have. */
+  coverage: number;
+  /** 0..100 — conviction (shown as a number, not a jumpy gauge). */
+  confidence: number;
+  convictionTier: ConvictionTier;
+  observationAgeMs: number;
+  entities: GraphEntity[];
+  bull: EvidenceItem[];
+  bear: EvidenceItem[];
+  bullScore: number;
+  bearScore: number;
+  why: string[];
+  timeline: TimelineEvent[];
+  at: number;
 }
 
 export interface SettingChange {

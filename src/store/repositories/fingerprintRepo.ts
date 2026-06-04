@@ -15,6 +15,15 @@ export class FingerprintRepo {
     this.db.prepare("UPDATE token_fingerprints SET outcome=? WHERE mint=?").run(outcome, mint);
   }
 
+  /** Count past WINNER tokens sharing this normalized name (graph evidence). */
+  similarWinners(normName: string): number {
+    if (!normName || normName.length < 3) return 0;
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS n FROM token_fingerprints WHERE outcome='winner' AND norm_name=?")
+      .get(normName) as { n: number };
+    return r.n;
+  }
+
   /** Fingerprints of tokens that ended as rugs (for similarity matching). */
   pastRugs(limit = 1000): Fingerprint[] {
     const rows = this.db

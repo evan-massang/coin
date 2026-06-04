@@ -1,6 +1,6 @@
 import type { ScoreBreakdown, Verdict } from "../types.js";
 
-// MicroFish dynamic risk sizing (§Phase 2). Turns a verdict + the score/safety
+// MiroFish dynamic risk sizing (§Phase 2). Turns a verdict + the score/safety
 // facts into a *recommended* position size — paper-only / advisory, NEVER a
 // real-wallet trade. Pure.
 

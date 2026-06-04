@@ -11,6 +11,9 @@ export function paperRoutes(svc: Services): Router {
 
   r.get("/paper", (_req, res) => {
     const s = svc.settings.all();
+    // Self-heal: if paper is enabled but the sim wallet was never created, make
+    // it now at the configured starting balance (so the UI shows it, not 0).
+    if (s.paperEnabled && !svc.paper.get()) svc.paper.ensure(s.paperStartingBalanceSol);
     const wallet = svc.paper.get();
     const open = svc.paperPositions.byStatus(true);
     const closed = svc.paperPositions.byStatus(false);

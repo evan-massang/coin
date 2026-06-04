@@ -1,7 +1,7 @@
 import type { Connection } from "@solana/web3.js";
 import type { Services } from "../services.js";
 import type { PumpPortalClient } from "../sources/pumpPortal.js";
-import type { NewToken, Decision, SafetyResult, ScoreBreakdown, TradeEvent, HypeResult } from "../types.js";
+import type { NewToken, Decision, SafetyResult, ScoreBreakdown, TradeEvent, HypeResult, GraphIntel } from "../types.js";
 import { emptyScores } from "../types.js";
 import { SeenCache } from "../util/seenCache.js";
 import { RateLimiter } from "../util/rateLimiter.js";
@@ -20,6 +20,7 @@ import { computeSourceAgreement } from "../agents/sourceAgreement.js";
 import { fingerprintToken, isSimilarToRug } from "../graph/tokenSimilarity.js";
 import { deployerReputation } from "../graph/deployerGraph.js";
 import { clusterRisk } from "../graph/walletClusterGraph.js";
+import { computeGraphIntelligence } from "../graph/graphIntelligence.js";
 import type { OrganicResult } from "./organicVolume.js";
 import type { MomentumResult } from "./momentum.js";
 import type { GraduationResult } from "./graduation.js";
@@ -307,7 +308,7 @@ export class EntryPipeline {
     const cluster = clusterRisk(this.svc.walletCluster.rugOverlap(buyers));
     const scamMemoryMultiplier = deployer.multiplier * sim.multiplier * cluster.multiplier;
 
-    // MicroFish dynamic risk sizing (advisory / paper-only).
+    // MiroFish dynamic risk sizing (advisory / paper-only).
     const risk = computeRisk({
       verdict: decision.verdict,
       conviction: decision.conviction,
@@ -337,6 +338,37 @@ export class EntryPipeline {
     ];
     decision.redFlags = [...flags, ...agreement.conflicts, ...scamFlags].slice(0, 5);
 
+    // Graph Intelligence Layer: turn the observation into the operator question —
+    // *why* does the engine believe (or doubt) this token? Builds the entity
+    // graph, bull/bear evidence, coverage, observation state + timeline. Pure;
+    // attaches a summary to the decision and stashes the full intel for detail panels.
+    const fp = fingerprintToken({ name: token.name, symbol: token.symbol, uri: token.uri });
+    const intel = computeGraphIntelligence({
+      mint: token.mint,
+      symbol: token.symbol,
+      creator: token.creator,
+      scores,
+      safety: stage1,
+      verdict: decision.verdict,
+      conviction: decision.conviction,
+      devSold,
+      bundle: bundle.detected,
+      rugMatch: sim.similar,
+      similarWinners: this.svc.fingerprints.similarWinners(fp.normName),
+      deployerLaunches: token.creator ? this.svc.creatorHistory.get(token.creator)?.launches : undefined,
+      liquidityUsd: tracked.rugcheck?.totalLiquidityUsd,
+      tradeCount: trades.length,
+      firstSeenAt: tracked.firstSeenAt,
+      now,
+    });
+    decision.state = intel.state;
+    decision.coverage = intel.coverage;
+    decision.convictionTier = intel.convictionTier;
+    decision.evidenceCount = intel.bull.length + intel.bear.length;
+    decision.bullCount = intel.bull.length;
+    decision.bearCount = intel.bear.length;
+    this.recordIntel(intel);
+
     tracked.lastDecision = decision;
     metrics.inc(`scored_${decision.verdict}`);
 
@@ -349,6 +381,27 @@ export class EntryPipeline {
     if (decision.verdict !== "BUY_SMALL" && decision.verdict !== "BUY_STRONG") {
       if (this.watched.delete(token.mint)) this.pump.unwatchToken(token.mint);
     }
+  }
+
+  /** Stash the latest graph intel (bounded LRU) + refresh engine-state tiles. */
+  private recordIntel(intel: GraphIntel): void {
+    const map = this.svc.runtime.intel;
+    map.delete(intel.mint); // re-insert to keep Map insertion-order as LRU
+    map.set(intel.mint, intel);
+    while (map.size > 200) {
+      const oldest = map.keys().next().value;
+      if (oldest === undefined) break;
+      map.delete(oldest);
+    }
+    // Engine-state tiles are a LIVE snapshot, not running totals: tokens we're
+    // observing right now + recent (≤30m) decision/conviction/risk activity.
+    const recent = [...map.values()].filter((x) => intel.at - x.at <= 30 * 60_000);
+    this.svc.runtime.engineState = {
+      observing: [...this.sm.observing()].length,
+      decisionReady: recent.filter((x) => x.state === "DECISION_READY").length,
+      highConviction: recent.filter((x) => x.convictionTier === "HIGH").length,
+      highRisk: recent.filter((x) => x.bearScore > x.bullScore).length,
+    };
   }
 
   /** Best-effort USD price for the journal (rate-limited; may be undefined). */

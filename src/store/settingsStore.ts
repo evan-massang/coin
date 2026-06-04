@@ -37,7 +37,7 @@ export const SettingsSchema = z.object({
   /** Assumed slippage + fee on paper fills, for realism. */
   paperSlippagePct: z.number().min(0).max(100).default(2),
 
-  // ── MicroFish dynamic risk sizing (advisory / paper-only) ──
+  // ── MiroFish dynamic risk sizing (advisory / paper-only) ──
   riskMode: z.enum(["microfish", "fixed"]).default("microfish"),
   baseRiskPct: z.number().min(0).max(100).default(1),
   maxRiskPct: z.number().min(0).max(100).default(2),

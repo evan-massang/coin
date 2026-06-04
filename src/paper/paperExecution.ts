@@ -72,11 +72,11 @@ export class PaperTrader {
     const snap = await this.price(decision.mint);
     if (!snap?.priceUsd) return; // can't price → skip
 
-    // Prefer MicroFish's dynamic size when available; else the fixed rules.
+    // Prefer MiroFish's dynamic size when available; else the fixed rules.
     let sizeSol: number;
     if (s.riskMode === "microfish" && decision.suggestedRiskPct !== undefined) {
       sizeSol = sizeFromRiskPct(decision.suggestedRiskPct, balanceSol, decision.maxPositionSol ?? s.paperMaxPositionSol);
-      if (sizeSol <= 0) return; // MicroFish sized it to zero (risk gate)
+      if (sizeSol <= 0) return; // MiroFish sized it to zero (risk gate)
     } else {
       const sizing = sizePaperBuy({
         verdict: decision.verdict,

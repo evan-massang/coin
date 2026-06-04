@@ -26,7 +26,21 @@ export function settingsRoutes(svc: Services): Router {
       if (patch[k] !== undefined && patch[k] === "") delete patch[k];
     }
     const changes = svc.settings.update(patch, "user");
+
+    // BUGFIX: enabling paper / changing the starting balance must initialize the
+    // sim wallet immediately, else /api/paper reports 0 SOL until a restart or
+    // first buy. Only (re)initialize when the wallet is FRESH (no trades) so we
+    // never wipe an in-progress sim.
+    if (patch.paperEnabled !== undefined || patch.paperStartingBalanceSol !== undefined) {
+      const s = svc.settings.all();
+      if (s.paperEnabled) {
+        const fresh = !svc.paper.get() || svc.paper.fills(1).length === 0;
+        if (fresh) svc.paper.reset(s.paperStartingBalanceSol);
+      }
+    }
+
     svc.hub.broadcast("settings", svc.settings.redacted());
+    svc.hub.broadcast("paper", { reset: true });
     res.json({ ok: true, changed: changes.map((c) => c.setting), settings: svc.settings.redacted() });
   });
 

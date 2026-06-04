@@ -284,6 +284,17 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_ai_audit_at ON ai_audit_log(at);
     `,
   },
+  {
+    version: 6,
+    up: /* sql */ `
+      ALTER TABLE signals ADD COLUMN state TEXT;
+      ALTER TABLE signals ADD COLUMN coverage REAL;
+      ALTER TABLE signals ADD COLUMN conviction_tier TEXT;
+      ALTER TABLE signals ADD COLUMN evidence_count INTEGER;
+      ALTER TABLE signals ADD COLUMN bull_count INTEGER;
+      ALTER TABLE signals ADD COLUMN bear_count INTEGER;
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

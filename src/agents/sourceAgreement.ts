@@ -1,6 +1,6 @@
 // §Phase 4 source agreement. When independent sources disagree (e.g. RugCheck
 // says clean but the observed trade stream looks bundled), trust the signal
-// less. Conflicts shrink the MicroFish size; confirmations nudge it up. Pure.
+// less. Conflicts shrink the MiroFish size; confirmations nudge it up. Pure.
 
 export interface SourceAgreementInputs {
   rugcheckClean?: boolean;
