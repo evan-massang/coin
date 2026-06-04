@@ -7,6 +7,9 @@ import { PositionsRepo } from "./store/repositories/positionsRepo.js";
 import { PaperRepo } from "./store/repositories/paperRepo.js";
 import { LearningRepo } from "./store/repositories/learningRepo.js";
 import { WalletsRepo } from "./store/repositories/walletsRepo.js";
+import { CreatorHistoryRepo } from "./store/repositories/creatorHistoryRepo.js";
+import { FingerprintRepo } from "./store/repositories/fingerprintRepo.js";
+import { WalletClusterRepo } from "./store/repositories/walletClusterRepo.js";
 import { WsHub } from "./dashboard/websocket.js";
 import { RugcheckCache } from "./sources/rugcheckCache.js";
 import { AlertDispatcher } from "./alerts/dispatcher.js";
@@ -37,6 +40,9 @@ export interface Services {
   paper: PaperRepo;
   learning: LearningRepo;
   wallets: WalletsRepo;
+  creatorHistory: CreatorHistoryRepo;
+  fingerprints: FingerprintRepo;
+  walletCluster: WalletClusterRepo;
   hub: WsHub;
   rugcheck: RugcheckCache;
   dispatcher: AlertDispatcher;
@@ -53,6 +59,9 @@ export function createServices(db: DB = getDb()): Services {
   const paper = new PaperRepo(db);
   const learning = new LearningRepo(db);
   const wallets = new WalletsRepo(db);
+  const creatorHistory = new CreatorHistoryRepo(db);
+  const fingerprints = new FingerprintRepo(db);
+  const walletCluster = new WalletClusterRepo(db);
   const hub = new WsHub();
   const rugcheck = new RugcheckCache();
 
@@ -75,6 +84,9 @@ export function createServices(db: DB = getDb()): Services {
     paper,
     learning,
     wallets,
+    creatorHistory,
+    fingerprints,
+    walletCluster,
     hub,
     rugcheck,
     dispatcher,

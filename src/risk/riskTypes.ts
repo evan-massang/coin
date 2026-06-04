@@ -29,6 +29,8 @@ export interface RiskContext {
   /** From Phase 4 agents; default 1 when absent. */
   marketWeatherMultiplier?: number;
   sourceAgreementMultiplier?: number;
+  /** From Phase 5 scam memory (deployer × similarity × cluster); default 1. */
+  scamMemoryMultiplier?: number;
   /** Tuning. */
   baseRiskPct: number;
   maxRiskPct: number;

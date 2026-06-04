@@ -17,6 +17,9 @@ import { runAgents, scoreOf } from "../agents/coordinator.js";
 import { SCORE_AGENTS } from "../agents/scoreAgents.js";
 import { fetchMarketWeather } from "../agents/marketWeather.js";
 import { computeSourceAgreement } from "../agents/sourceAgreement.js";
+import { fingerprintToken, isSimilarToRug } from "../graph/tokenSimilarity.js";
+import { deployerReputation } from "../graph/deployerGraph.js";
+import { clusterRisk } from "../graph/walletClusterGraph.js";
 import type { OrganicResult } from "./organicVolume.js";
 import type { MomentumResult } from "./momentum.js";
 import type { GraduationResult } from "./graduation.js";
@@ -124,6 +127,10 @@ export class EntryPipeline {
     metrics.inc("tokens_seen");
     this.svc.tokens.upsert(token);
     const tracked = this.sm.track(token, now);
+
+    // Scam memory: record the launch + a token fingerprint (Phase 5).
+    if (token.creator) this.svc.creatorHistory.recordLaunch(token.creator, now);
+    this.svc.fingerprints.record(token.mint, fingerprintToken({ name: token.name, symbol: token.symbol, uri: token.uri }), now);
 
     const t0 = Date.now();
     const { inputs, report } = await this.gatherStage0(token);
@@ -262,6 +269,15 @@ export class EntryPipeline {
       sourceConflictMultiplier: s.sourceConflictMultiplier,
     });
 
+    // Phase 5 scam memory: deployer reputation × rug-relaunch similarity ×
+    // buyer-cluster overlap.
+    const deployer = deployerReputation(token.creator ? this.svc.creatorHistory.get(token.creator) : undefined);
+    const sim = isSimilarToRug({ name: token.name, symbol: token.symbol, uri: token.uri }, this.svc.fingerprints.pastRugs());
+    const buyers = [...new Set(trades.filter((t) => t.side === "buy").map((t) => t.trader).filter(Boolean))];
+    this.svc.walletCluster.recordCoBuy(buyers, now);
+    const cluster = clusterRisk(this.svc.walletCluster.rugOverlap(buyers));
+    const scamMemoryMultiplier = deployer.multiplier * sim.multiplier * cluster.multiplier;
+
     // MicroFish dynamic risk sizing (advisory / paper-only).
     const risk = computeRisk({
       verdict: decision.verdict,
@@ -274,6 +290,7 @@ export class EntryPipeline {
       minLiquidityUsd: s.minLiquidityUsd,
       marketWeatherMultiplier: weather.multiplier,
       sourceAgreementMultiplier: agreement.multiplier,
+      scamMemoryMultiplier,
       baseRiskPct: s.baseRiskPct,
       maxRiskPct: s.maxRiskPct,
       minRiskPct: s.minRiskPct,
@@ -284,7 +301,12 @@ export class EntryPipeline {
     decision.maxPositionSol = risk.maxPositionSol;
     decision.marketWeather = weather.weather;
     decision.sourceAgreement = agreement.score;
-    decision.redFlags = [...flags, ...agreement.conflicts].slice(0, 5);
+    const scamFlags = [
+      ...deployer.reasons,
+      ...(sim.similar ? [`name matches past rug "${sim.match}"`] : []),
+      ...cluster.reasons,
+    ];
+    decision.redFlags = [...flags, ...agreement.conflicts, ...scamFlags].slice(0, 5);
 
     tracked.lastDecision = decision;
     metrics.inc(`scored_${decision.verdict}`);

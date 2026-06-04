@@ -48,13 +48,17 @@ export function computeRisk(ctx: RiskContext): RiskDecision {
     timeDecay: timeDecayMult(ctx.scores.lateEntryRisk),
   };
 
+  const scamMemory = ctx.scamMemoryMultiplier ?? 1;
+
   if (ctx.unknownCount >= 2) reasons.push("safety unknowns ⇒ ×0.35");
   if (m.liquidity < 0.8) reasons.push("thin/unknown liquidity");
   if (m.marketWeather < 0.9) reasons.push("market risk-off");
   if (m.sourceAgreement < 0.9) reasons.push("source conflict");
   if (m.timeDecay < 0.8) reasons.push("late entry ⇒ size cut");
+  if (scamMemory < 1) reasons.push("scam-memory match ⇒ size cut");
 
-  const product = m.safety * m.liquidity * m.organic * m.momentum * m.marketWeather * m.sourceAgreement * m.volatility * m.timeDecay;
+  const product =
+    m.safety * m.liquidity * m.organic * m.momentum * m.marketWeather * m.sourceAgreement * m.volatility * m.timeDecay * scamMemory;
   const suggestedRiskPct = clamp(ctx.baseRiskPct * product, 0, ctx.maxRiskPct);
   const finalPct = suggestedRiskPct < ctx.minRiskPct ? 0 : suggestedRiskPct;
   const riskTier = tierFor(finalPct);

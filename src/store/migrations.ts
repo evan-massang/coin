@@ -214,6 +214,40 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE signals ADD COLUMN red_flags TEXT;
     `,
   },
+  {
+    version: 3,
+    up: /* sql */ `
+      CREATE TABLE IF NOT EXISTS creator_history (
+        creator    TEXT PRIMARY KEY,
+        launches   INTEGER NOT NULL DEFAULT 0,
+        rugs       INTEGER NOT NULL DEFAULT 0,
+        winners    INTEGER NOT NULL DEFAULT 0,
+        first_seen INTEGER NOT NULL,
+        last_seen  INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS token_fingerprints (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        mint        TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        norm_name   TEXT,
+        symbol      TEXT,
+        at          INTEGER NOT NULL,
+        outcome     TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_fp_fingerprint ON token_fingerprints(fingerprint);
+      CREATE INDEX IF NOT EXISTS idx_fp_norm ON token_fingerprints(norm_name);
+
+      CREATE TABLE IF NOT EXISTS wallet_cluster_edges (
+        a            TEXT NOT NULL,
+        b            TEXT NOT NULL,
+        co_buys      INTEGER NOT NULL DEFAULT 0,
+        rug_overlaps INTEGER NOT NULL DEFAULT 0,
+        last_at      INTEGER NOT NULL,
+        PRIMARY KEY (a, b)
+      );
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */
