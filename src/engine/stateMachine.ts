@@ -1,4 +1,5 @@
 import type { Decision, NewToken, SafetyResult } from "../types.js";
+import type { RugcheckReport } from "../sources/rugcheck.js";
 
 // Per-token lifecycle. A token moves NEW → (Stage-0) → OBSERVING → SCORED, or
 // is AVOIDED at any hard gate. OBSERVING is the Stage-1 window (30–180s) during
@@ -14,6 +15,8 @@ export interface TrackedToken {
   stage0?: SafetyResult;
   stage1?: SafetyResult;
   lastDecision?: Decision;
+  /** Full RugCheck report (for the risk layer + UI; Phase 1 stashes it). */
+  rugcheck?: RugcheckReport;
 }
 
 export class TokenStateMachine {

@@ -22,6 +22,8 @@ import { decide } from "../scoring/decisionCaps.js";
 import { thresholdsFromSettings } from "../scoring/thresholds.js";
 import { makeConnection } from "../sources/solanaRpc.js";
 import { fetchAuthorities } from "../checks/authorities.js";
+import { fetchHolderConcentration } from "../checks/holderConcentration.js";
+import type { RugcheckReport } from "../sources/rugcheck.js";
 import { fetchDexSnapshot } from "../sources/dexscreener.js";
 
 // New-token scanner + full entry pipeline (Phases 2–3).
@@ -121,8 +123,12 @@ export class EntryPipeline {
     const tracked = this.sm.track(token, now);
 
     const t0 = Date.now();
-    const inputs = await this.gatherStage0(token);
-    const stage0 = evaluateStage0(inputs, { maxTopHolderPct: this.svc.settings.get("maxTopHolderPct") });
+    const { inputs, report } = await this.gatherStage0(token);
+    tracked.rugcheck = report;
+    const stage0 = evaluateStage0(inputs, {
+      maxTopHolderPct: this.svc.settings.get("maxTopHolderPct"),
+      minLiquidityUsd: this.svc.settings.get("minLiquidityUsd"),
+    });
     metrics.observe("stage0_ms", Date.now() - t0);
     tracked.stage0 = stage0;
 
@@ -268,22 +274,46 @@ export class EntryPipeline {
     return snap?.priceUsd;
   }
 
-  private async gatherStage0(token: NewToken): Promise<Stage0Inputs> {
-    let auth: { mintAuthorityRevoked?: boolean; freezeAuthorityNull?: boolean } = {};
+  private async gatherStage0(token: NewToken): Promise<{ inputs: Stage0Inputs; report?: RugcheckReport }> {
+    const settings = this.svc.settings.all();
+    const conn: Connection = makeConnection(settings);
+
+    // RugCheck is the primary, keyless safety source — always queried (cached).
+    const rugcheckP = withTimeout(
+      this.svc.rugcheck.getReport(token.mint, { apiKey: settings.rugcheckApiKey || undefined }),
+      this.stage0BudgetMs,
+    ).catch(() => undefined);
+
+    // RPC authority cross-check — rate-limited so the public node isn't hammered.
+    let authP: Promise<{ mintAuthorityRevoked?: boolean; freezeAuthorityNull?: boolean }>;
     if (this.rpcLimiter.tryAcquire()) {
-      const conn: Connection = makeConnection(this.svc.settings.all());
-      auth = await withTimeout(fetchAuthorities(conn, token.mint), this.stage0BudgetMs).catch(() => ({}));
+      authP = withTimeout(fetchAuthorities(conn, token.mint), this.stage0BudgetMs).catch(() => ({}));
     } else {
       metrics.inc("stage0_rpc_skipped");
+      authP = Promise.resolve({});
     }
-    return {
+
+    // RPC holder concentration — only with a Helius key (avoids public-RPC 429s).
+    const holdersP: Promise<{ topHolderPct?: number }> = settings.heliusApiKey
+      ? withTimeout(fetchHolderConcentration(conn, token.mint), this.stage0BudgetMs).catch(() => ({}))
+      : Promise.resolve({});
+
+    const [report, rpcAuth, rpcHolders] = await Promise.all([rugcheckP, authP, holdersP]);
+
+    const inputs: Stage0Inputs = {
       metadata: { name: token.name, symbol: token.symbol, uri: token.uri },
-      mintAuthorityRevoked: auth.mintAuthorityRevoked,
-      freezeAuthorityNull: auth.freezeAuthorityNull,
+      mintAuthorityRevoked: rpcAuth.mintAuthorityRevoked ?? report?.mintAuthorityRevoked,
+      freezeAuthorityNull: rpcAuth.freezeAuthorityNull ?? report?.freezeAuthorityNull,
       deployerBlacklisted: token.creator ? this.blacklist.has(token.creator) : false,
-      topHolderPct: undefined,
-      bundleDetected: undefined,
+      topHolderPct: rpcHolders.topHolderPct ?? report?.topHolderPct,
+      // RugCheck resolves the bundle unknown; a DANGER-level insider/bundle risk
+      // (insiderClean=false) is the only thing that flips it true. Stage-1
+      // analyzeBundle remains the behavioural authority post-observation.
+      bundleDetected: report ? !report.insiderClean : undefined,
+      rugcheck: report ? { riskLevel: report.riskLevel, highRisk: report.highRisk, honeypot: report.honeypot } : undefined,
+      lp: report ? { liquidityUsd: report.totalLiquidityUsd, lpLockedPct: report.lpLockedPct } : undefined,
     };
+    return { inputs, report };
   }
 
   private avoidDecision(token: NewToken, stage0: SafetyResult, at: number): Decision {

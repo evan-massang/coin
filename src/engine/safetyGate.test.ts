@@ -11,6 +11,7 @@ function clean(): Stage0Inputs {
     deployerBlacklisted: false,
     topHolderPct: 8,
     bundleDetected: false,
+    rugcheck: { riskLevel: "low", highRisk: false },
   };
 }
 
@@ -90,5 +91,53 @@ describe("Stage-1 promotion (survivors only)", () => {
     const s1 = evaluateStage1(s0, { devWalletSold: false });
     expect(s1.pass).toBe(false);
     expect(s1.stage).toBe(1);
+  });
+});
+
+describe("Stage-0 with RugCheck inputs (the false safety-unknowns bug fix)", () => {
+  it("RugCheck data resolves the unknowns that caused the false WATCH_ONLY cap", () => {
+    // Without RugCheck and without holder/bundle data: ≥2 UNKNOWN → the old cap.
+    const withoutRc = evaluateStage0(
+      { ...clean(), topHolderPct: undefined, bundleDetected: undefined, rugcheck: undefined },
+      CFG,
+    );
+    expect(withoutRc.unknownCount).toBeGreaterThanOrEqual(2);
+
+    // With RugCheck resolving holders + bundle + risk: no unknowns, passes clean.
+    const withRc = evaluateStage0(
+      { ...clean(), topHolderPct: 8, bundleDetected: false, rugcheck: { riskLevel: "low", highRisk: false } },
+      CFG,
+    );
+    expect(withRc.unknownCount).toBe(0);
+    expect(withRc.pass).toBe(true);
+  });
+
+  it("RugCheck honeypot is a hard fail", () => {
+    const r = evaluateStage0({ ...clean(), rugcheck: { riskLevel: "danger", highRisk: true, honeypot: true } }, CFG);
+    expect(r.pass).toBe(false);
+    expect(r.fatalReasons.join(" ")).toMatch(/honeypot/i);
+  });
+
+  it("a non-honeypot danger/medium risk does NOT hard-fail (lenient)", () => {
+    const medium = evaluateStage0({ ...clean(), rugcheck: { riskLevel: "medium", highRisk: false } }, CFG);
+    expect(medium.pass).toBe(true);
+    const dangerNoHoneypot = evaluateStage0({ ...clean(), rugcheck: { riskLevel: "danger", highRisk: false, honeypot: false } }, CFG);
+    expect(dangerNoHoneypot.pass).toBe(true);
+  });
+
+  it("thin liquidity is non-fatal (never blocks a brand-new token)", () => {
+    const r = evaluateStage0(
+      { ...clean(), lp: { liquidityUsd: 100, lpLockedPct: 0 } },
+      { ...CFG, minLiquidityUsd: 3000 },
+    );
+    expect(r.pass).toBe(true);
+    expect(r.checks.find((c) => c.id === "liquidity")?.status).toBe("FAIL");
+    expect(r.checks.find((c) => c.id === "liquidity")?.fatal).toBe(false);
+  });
+
+  it("missing RugCheck behaves like before (rugcheckRisk UNKNOWN, non-fatal)", () => {
+    const r = evaluateStage0({ ...clean(), rugcheck: undefined }, CFG);
+    expect(r.pass).toBe(true);
+    expect(r.checks.find((c) => c.id === "rugcheckRisk")?.status).toBe("UNKNOWN");
   });
 });

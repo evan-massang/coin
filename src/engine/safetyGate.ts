@@ -1,4 +1,5 @@
 import type { SafetyCheck, SafetyResult } from "../types.js";
+import { assessLp } from "../checks/lpSafety.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Two-stage safety gate (§1.2). PURE evaluators — all network data is gathered
@@ -26,11 +27,17 @@ export interface Stage0Inputs {
   topHolderPct?: number;
   /** Obvious bundle / sniper cluster at launch. */
   bundleDetected?: boolean;
+  /** RugCheck verdict (resolves unknowns; honeypot is the only new hard-fail). */
+  rugcheck?: { riskLevel: "low" | "medium" | "danger" | "unknown"; highRisk: boolean; honeypot?: boolean };
+  /** Liquidity facts (non-fatal; undefined for brand-new pre-grad tokens). */
+  lp?: { liquidityUsd?: number; lpLockedPct?: number };
 }
 
 export interface SafetyConfig {
   /** A single holder above this % is an early-concentration hard fail. */
   maxTopHolderPct: number;
+  /** Below this USD liquidity is flagged (non-fatal). */
+  minLiquidityUsd?: number;
 }
 
 export interface Stage1Inputs {
@@ -133,6 +140,26 @@ export function evaluateStage0(inp: Stage0Inputs, cfg: SafetyConfig): SafetyResu
     checks.push(
       check("bundle", "Bundle/sniper", inp.bundleDetected ? "FAIL" : "PASS", true, inp.bundleDetected ? "bundle/sniper cluster at launch" : undefined),
     );
+  }
+
+  // RugCheck risk. Lenient: only a honeypot hard-fails; warn/medium just shows.
+  if (inp.rugcheck === undefined) {
+    checks.push(check("rugcheckRisk", "RugCheck", "UNKNOWN", false));
+  } else if (inp.rugcheck.honeypot) {
+    checks.push(check("rugcheckRisk", "RugCheck", "FAIL", true, "RugCheck: honeypot / cannot-sell risk"));
+  } else {
+    checks.push(check("rugcheckRisk", "RugCheck", "PASS", false, `RugCheck: ${inp.rugcheck.riskLevel} risk`));
+  }
+
+  // Liquidity (non-fatal). Only added when we actually have a number, so it
+  // never inflates unknownCount for brand-new pre-grad tokens.
+  if (inp.lp?.liquidityUsd !== undefined) {
+    const lp = assessLp({
+      liquidityUsd: inp.lp.liquidityUsd,
+      minLiquidityUsd: cfg.minLiquidityUsd ?? 0,
+      lpBurnedOrLocked: inp.lp.lpLockedPct !== undefined ? inp.lp.lpLockedPct > 0 : undefined,
+    });
+    checks.push(check("liquidity", "Liquidity", lp.ok ? "PASS" : "FAIL", false, lp.reasons.join("; ") || undefined));
   }
 
   return finalize(checks, 0);

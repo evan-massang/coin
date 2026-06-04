@@ -8,6 +8,7 @@ import { PaperRepo } from "./store/repositories/paperRepo.js";
 import { LearningRepo } from "./store/repositories/learningRepo.js";
 import { WalletsRepo } from "./store/repositories/walletsRepo.js";
 import { WsHub } from "./dashboard/websocket.js";
+import { RugcheckCache } from "./sources/rugcheckCache.js";
 import { AlertDispatcher } from "./alerts/dispatcher.js";
 import { DesktopNotifier } from "./alerts/desktopNotifier.js";
 import { ChimePlayer } from "./alerts/sound.js";
@@ -37,6 +38,7 @@ export interface Services {
   learning: LearningRepo;
   wallets: WalletsRepo;
   hub: WsHub;
+  rugcheck: RugcheckCache;
   dispatcher: AlertDispatcher;
   runtime: RuntimeState;
 }
@@ -52,6 +54,7 @@ export function createServices(db: DB = getDb()): Services {
   const learning = new LearningRepo(db);
   const wallets = new WalletsRepo(db);
   const hub = new WsHub();
+  const rugcheck = new RugcheckCache();
 
   const dispatcher = new AlertDispatcher({
     settings,
@@ -73,6 +76,7 @@ export function createServices(db: DB = getDb()): Services {
     learning,
     wallets,
     hub,
+    rugcheck,
     dispatcher,
     runtime: {
       wallet: { address: settings.get("walletAddress"), connected: false },
