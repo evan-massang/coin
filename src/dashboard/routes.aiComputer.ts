@@ -30,6 +30,10 @@ export function aiComputerRoutes(svc: Services): Router {
     res.json(svc.aiComputer.audit.list(200));
   });
 
+  r.get("/ai-computer/latest", (_req, res) => {
+    res.json(svc.aiComputer.latest() ?? null);
+  });
+
   r.post("/ai-computer/approve/:id", (req, res) => {
     // Refuses wallet/financial/mutating actions by design.
     res.json(svc.aiComputer.approvals.approve(req.params.id));

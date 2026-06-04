@@ -3,119 +3,118 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MEMEFISH · Signal Terminal</title>
+    <title>MICROFISH RISK ENGINE</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="screen">
-      <div class="ticker-top">
-        <span>◎ SOLANA · <b class="green">LIVE</b> · 2026 · <span id="t-weather">—</span> · <span id="t-wallet">no wallet</span></span>
-        <span class="badge" id="t-badge">▣ SCANNING</span>
-        <span><span id="t-clock">--:--:--</span> · <span class="muted">UTC</span></span>
-      </div>
-
-      <div class="brand-row">
-        <div class="brand">@memefish · <span class="green">MEMEFISH</span> <span class="muted">SIGNAL SCANNER</span></div>
-        <div class="brand-right"><span class="ro">READ-ONLY</span><a class="cfg" id="open-config">⚙ CONFIG</a></div>
-      </div>
-
-      <!-- hero: tokens scanned + best catch -->
-      <section class="hero">
-        <div class="hero-main">
-          <div class="sec-label">TOKENS SCANNED · ALL-TIME <span class="tag" id="hero-mode">● LIVE</span></div>
-          <div class="bignum" id="hero-num">0</div>
-          <div class="hero-sub" id="hero-sub">0 survived · 0 buy signals · 0% hit ≥2x</div>
-          <div class="hero-wallet" id="hero-walletline">manual trading · we never sign or auto-buy</div>
-          <div class="dots" id="hero-dots"></div>
+    <div class="term">
+      <!-- ── header ── -->
+      <header class="topbar">
+        <div class="tb-brand">
+          <div class="tb-title">◎ MICROFISH RISK ENGINE</div>
+          <div class="tb-sub">MEME COIN INTELLIGENCE · LIVE SCANNER · READ-ONLY</div>
         </div>
-        <div class="hero-win">
-          <div class="sec-label gold">★ BEST CATCH</div>
-          <div class="win-big" id="catch-big">—</div>
-          <div class="win-sub" id="catch-sub">peak after our signal</div>
+        <div class="tb-scan"><span class="dot-live"></span> LIVE SCANNING <b id="ls-timer">00:00:00</b></div>
+        <div class="tb-right">
+          <div class="tb-clock"><span id="t-clock">--:--:--</span> · <span class="muted">UTC</span></div>
+          <div class="tb-sys">SYSTEM <span id="sys" class="green">● ONLINE</span> · <a class="cfg" id="open-config">⚙ CONFIG</a></div>
         </div>
+      </header>
+
+      <!-- ── stat tiles ── -->
+      <section class="tiles">
+        <div class="tile"><div class="t-k">TOKENS SCANNED</div><div class="t-v green" id="tile-scanned">0</div><div class="t-d" id="td-scanned">↑ 0 today</div><canvas class="spark" id="sp-scanned" height="26"></canvas></div>
+        <div class="tile"><div class="t-k">WINNERS FOUND</div><div class="t-v green" id="tile-winners">0</div><div class="t-d" id="td-winners">↑ 0 today</div><canvas class="spark" id="sp-winners" height="26"></canvas></div>
+        <div class="tile"><div class="t-k">RUGS AVOIDED</div><div class="t-v red" id="tile-rugs">0</div><div class="t-d" id="td-rugs">↑ 0 today</div><canvas class="spark" id="sp-rugs" height="26"></canvas></div>
+        <div class="tile"><div class="t-k">BUY SIGNALS</div><div class="t-v gold" id="tile-early">0</div><div class="t-d" id="td-early">↑ 0 today</div><canvas class="spark" id="sp-early" height="26"></canvas></div>
       </section>
 
-      <!-- live scan graph -->
-      <section class="panel">
-        <div class="panel-head">
-          <span class="tag" id="graph-tag">● SCANNING</span>
-          <h2>Live Scan Graph · token flow</h2>
-          <span class="muted small" id="graph-stats">nodes 0</span>
-        </div>
-        <div class="graph-wrap">
-          <canvas id="graph" width="540" height="290"></canvas>
-          <div class="graph-side" id="top-panel">
-            <div class="kvline"><span>TOP BUY</span><b id="tp-sym">—</b></div>
-            <div class="kvline"><span>verdict</span><b id="tp-verdict">—</b></div>
-            <div class="kvline"><span>conviction</span><b id="tp-conv">—</b></div>
-            <div class="kvline"><span>safety</span><b id="tp-safety">—</b></div>
-            <div class="kvline"><span>momentum</span><b id="tp-mom">—</b></div>
-            <div class="kvline"><span>risk tier</span><b id="tp-risk">—</b></div>
-            <div class="tp-flag" id="tp-flag"></div>
+      <!-- ── main grid ── -->
+      <section class="maingrid">
+        <div class="leftcol">
+          <!-- relationship graph -->
+          <div class="panel">
+            <div class="panel-head"><span class="tag">● NETWORK</span><h2>Relationship Graph · wallet &amp; entity</h2><span class="muted small" id="graph-stats">nodes 0</span></div>
+            <div class="graph-wrap">
+              <div class="legend col" id="legend"></div>
+              <canvas id="graph" width="560" height="320"></canvas>
+            </div>
+          </div>
+          <!-- live token feed -->
+          <div class="panel">
+            <div class="panel-head"><span class="tag">▤ LIVE</span><h2>Live Token Feed</h2><span class="muted small" id="feed-rate">0/min</span></div>
+            <table class="feed">
+              <thead><tr><th>TOKEN</th><th>AGE</th><th>BUY PRESSURE</th><th>ORGANIC</th><th>RISK</th><th>CONF</th><th>STATUS</th></tr></thead>
+              <tbody id="feed"></tbody>
+            </table>
           </div>
         </div>
-        <div class="legend" id="legend"></div>
-      </section>
 
-      <!-- live signal tape (replaces candlesticks) -->
-      <section class="panel">
-        <div class="panel-head">
-          <span class="tag">▤ LIVE</span>
-          <h2>Live Signal Tape</h2>
-          <span class="muted small" id="tape-rate">0/min</span>
-        </div>
-        <div class="tape" id="tape"><div class="tape-empty">waiting for signals…</div></div>
-      </section>
-
-      <!-- funnel + market weather -->
-      <section class="split">
-        <div class="panel">
-          <div class="panel-head"><span class="tag dark">FUNNEL</span><h2>Scan → Signal</h2><span class="muted small">session</span></div>
-          <div id="funnel"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><span class="tag">REGIME</span><h2>Market &amp; Health</h2></div>
-          <div id="weather"></div>
-        </div>
-      </section>
-
-      <!-- signal performance + equity -->
-      <section class="split">
-        <div class="panel">
-          <div class="panel-head"><span class="tag dark">PERFORMANCE</span><h2>Signal Quality</h2></div>
-          <div class="bignum sm green" id="perf-hit">0%</div>
-          <div class="sec-label">HIT RATE · signals that reached ≥2x</div>
-          <div class="statgrid">
-            <div class="stat"><div class="s-k">SCANNED</div><div class="s-v" id="st-scanned">0</div></div>
-            <div class="stat"><div class="s-k">SURVIVED</div><div class="s-v" id="st-surv">0%</div></div>
-            <div class="stat"><div class="s-k">BUY SIG</div><div class="s-v" id="st-buy">0</div></div>
-            <div class="stat"><div class="s-k">AVG GAIN</div><div class="s-v" id="st-avg">0%</div></div>
+        <div class="rightcol">
+          <!-- best call -->
+          <div class="panel bestcall">
+            <div class="panel-head"><span class="tag gold">★ BEST CALL</span><h2>today</h2></div>
+            <div class="bc-token" id="bc-token">—</div>
+            <div class="bc-grid">
+              <div><div class="s-k">PEAK GAIN</div><div class="bc-gain" id="bc-gain">—</div></div>
+              <div><div class="s-k">CONFIDENCE</div><div class="s-v" id="bc-conf">—</div></div>
+            </div>
+            <div class="bc-detect" id="bc-detect">—</div>
           </div>
-          <div class="sec-label">LAST 30 CALL OUTCOMES · max gain after signal</div>
-          <canvas id="bars" width="320" height="110"></canvas>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><span class="tag">EQUITY</span><h2 id="curve-window">—</h2></div>
-          <div class="statrow">
-            <div class="stat"><div class="s-k">PEAK</div><div class="s-v green" id="cv-peak">—</div></div>
-            <div class="stat"><div class="s-k">CURRENT</div><div class="s-v" id="cv-cur">—</div></div>
-            <div class="stat"><div class="s-k">DRAWDOWN</div><div class="s-v red" id="cv-dd">—</div></div>
+          <!-- market weather -->
+          <div class="panel">
+            <div class="panel-head"><span class="tag">⛅ WEATHER</span><h2>market regime</h2></div>
+            <div class="wx-state wx-NEUTRAL" id="wx-state">—</div>
+            <div class="wxline"><span>SOL 24h</span><b id="wx-sol">—</b></div>
+            <div class="wxline"><span>BTC 24h</span><b id="wx-btc">—</b></div>
+            <div class="wxline"><span>meme activity</span><b id="wx-meme">—</b></div>
+            <div class="wxline"><span>new tokens seen</span><b id="wx-new">—</b></div>
           </div>
-          <canvas id="curve" width="320" height="200"></canvas>
+          <!-- source agreement -->
+          <div class="panel">
+            <div class="panel-head"><span class="tag">◇ SOURCES</span><h2>agreement</h2></div>
+            <div id="src-list"></div>
+            <div class="sec-label">AGREEMENT SCORE</div>
+            <div class="bignum sm green" id="src-score">—</div>
+          </div>
+          <!-- ai council -->
+          <div class="panel">
+            <div class="panel-head"><span class="tag">⚖ COUNCIL</span><h2>AI opinion</h2></div>
+            <div id="council-list"><div class="muted small">add an Anthropic key + run AI research</div></div>
+          </div>
         </div>
       </section>
 
-      <div class="ticker-bottom"><div class="marquee" id="marquee">loading…</div></div>
+      <!-- ── bottom grid ── -->
+      <section class="botgrid">
+        <div class="panel">
+          <div class="panel-head"><span class="tag dark">STATS</span><h2>MicroFish · all-time</h2></div>
+          <div id="ms-list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">📈 ACCURACY</span><h2>Confidence Curve</h2><span class="muted small" id="cv-today">—</span></div>
+          <canvas id="curve" width="360" height="200"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="tag">▦ EVIDENCE</span><h2 id="ev-token">current token</h2></div>
+          <div class="ev-wrap">
+            <div id="ev-list" class="ev-list"></div>
+            <div class="ev-gauge"><canvas id="ev-gauge" width="120" height="120"></canvas><div class="ev-overall" id="ev-overall">—</div><div class="s-k">OVERALL</div></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="ticker-bottom"><div class="marquee" id="alerts">loading…</div></div>
     </div>
 
     <div class="overlay" id="config">
       <div class="overlay-box">
         <div class="panel-head"><span class="tag dark">CONFIG</span><h2>Settings</h2><a class="cfg" id="close-config">✕ CLOSE</a></div>
         <form class="cfgform" id="cfgform"></form>
-        <div class="panel-head"><span class="tag">AI COMPUTER</span><h2>read-only research</h2></div>
+        <div class="panel-head"><span class="tag">AI COMPUTER</span><h2>read-only research → feeds Council</h2></div>
         <form class="cfgform" id="aiform">
           <label class="full">token mint <input type="text" name="mint" placeholder="paste a mint"/></label>
           <div class="cfgrow"><button class="btn" type="submit">Run research</button><span class="muted" id="ai-out"></span></div>

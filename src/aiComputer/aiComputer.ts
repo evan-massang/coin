@@ -51,6 +51,13 @@ export class AiComputer {
     return this.results.get(taskId);
   }
 
+  /** Most recent completed research result (for the dashboard council panel). */
+  latest(): AiComputerResult | undefined {
+    let best: AiComputerResult | undefined;
+    for (const r of this.results.values()) if (!best || r.at > best.at) best = r;
+    return best;
+  }
+
   get queueSize(): number {
     return this.queue.size;
   }

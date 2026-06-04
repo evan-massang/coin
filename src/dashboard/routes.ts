@@ -2,6 +2,8 @@ import { Router } from "express";
 import type { Services } from "../services.js";
 import { metrics } from "../util/metrics.js";
 import { buildLinks } from "../alerts/templates.js";
+import { getMarketMacro } from "../sources/coingecko.js";
+import { fetchMarketWeather } from "../agents/marketWeather.js";
 
 /** Core read API: status, journal/signals, positions, tokens. */
 export function coreRoutes(svc: Services): Router {
@@ -45,6 +47,20 @@ export function coreRoutes(svc: Services): Router {
 
   r.get("/journal/stats", (_req, res) => {
     res.json(svc.signals.stats());
+  });
+
+  // Market weather + macro (SOL/BTC 24h) for the regime panel.
+  r.get("/market", async (_req, res) => {
+    const s = svc.settings.all();
+    const macro = await getMarketMacro().catch(() => ({}));
+    const weather = await fetchMarketWeather(
+      () => {
+        const st = svc.signals.stats();
+        return { winRate: st.winRate, samples: st.total };
+      },
+      s.riskOffMultiplier,
+    ).catch(() => ({ weather: "NEUTRAL" as const, multiplier: 1, reasons: [] }));
+    res.json({ weather: weather.weather, multiplier: weather.multiplier, reasons: weather.reasons, ...macro });
   });
 
   // Wallet observer tab: status + detected positions with live PnL.
