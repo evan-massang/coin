@@ -1,0 +1,6 @@
+{
+  "_comment": "Classic / established meme names for revival detection. A new token echoing one of these is flagged is_revival.",
+  "memes": [
+    "doge", "pepe", "shiba", "shib", "wif", "bonk", "pnut", "peanut", "popcat", "mog", "brett", "wojak", "chad", "gigachad", "mumu", "ponke", "slerf", "myro", "michi", "moodeng", "fwog", "goat", "retardio", "giga", "harambe", "grumpy", "nyan", "doland", "turbo", "ladys", "milady", "andy", "boden", "tremp", "fartcoin", "act", "ai16z", "griffain", "zerebro"
+  ]
+}

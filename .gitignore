@@ -1,4 +1,4 @@
-# Secrets — NEVER commit
+# Secrets — NEVER commit. (This app stores API keys in SQLite via the UI, not here.)
 .env
 .env.*
 !.env.example
@@ -12,8 +12,15 @@ dist/
 *.log
 npm-debug.log*
 
-# Local data caches
+# Local data — ignore SQLite DBs + runtime caches, but KEEP the JSON seed files
+# (data/narratives.json, data/known-memes.json) that the app loads at runtime.
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+data/*.sqlite*
 data/seen-tokens.json
+ruvector.db
 
 # OS
 Thumbs.db

@@ -1,0 +1,89 @@
+import { describe, it, expect } from "vitest";
+import { evaluateExit, defaultExitPlan } from "./exitEngine.js";
+import type { Position } from "../types.js";
+
+const MAX_HOLD = 60 * 60 * 1000;
+
+function pos(over: Partial<Position> = {}): Position {
+  return {
+    id: 1,
+    mint: "M",
+    symbol: "WIF",
+    source: "wallet",
+    status: "OPEN",
+    entryPriceUsd: 1,
+    entryAtMs: 0,
+    tokenAmount: 1000,
+    initialTokenAmount: 1000,
+    solInvested: 1,
+    costBasisUsd: 150,
+    realizedPnlUsd: 0,
+    peakPriceUsd: 1,
+    lastPriceUsd: 1,
+    exitPlan: defaultExitPlan(MAX_HOLD),
+    ...over,
+  };
+}
+
+describe("evaluateExit", () => {
+  it("HOLDs below the first rung with no danger signals", () => {
+    const r = evaluateExit(pos({ peakPriceUsd: 1.5 }), { currentPriceUsd: 1.5, now: 1000 }, { maxHoldMs: MAX_HOLD });
+    expect(r.signal.kind).toBe("HOLD");
+  });
+
+  it("fires the 2x ladder rung as SELL_TRIM (~40%)", () => {
+    const r = evaluateExit(pos({ peakPriceUsd: 2 }), { currentPriceUsd: 2, now: 1000 }, { maxHoldMs: MAX_HOLD });
+    expect(r.signal.kind).toBe("SELL_TRIM");
+    expect(r.signal.sellPct).toBeCloseTo(0.4, 2);
+    expect(r.rungsHit).toEqual([0]);
+  });
+
+  it("hits multiple rungs at once on a price jump (40+30+20%)", () => {
+    const r = evaluateExit(pos({ peakPriceUsd: 5 }), { currentPriceUsd: 5, now: 1000 }, { maxHoldMs: MAX_HOLD });
+    expect(r.signal.kind).toBe("SELL_TRIM");
+    expect(r.signal.sellPct).toBeCloseTo(0.9, 2);
+    expect(r.rungsHit).toEqual([0, 1, 2]);
+  });
+
+  it("HARD EXIT beats the profit ladder (dev sold at 2x ⇒ SELL_EXIT_NOW 100%)", () => {
+    const r = evaluateExit(
+      pos({ peakPriceUsd: 2 }),
+      { currentPriceUsd: 2, now: 1000, hard: { devWalletSold: true } },
+      { maxHoldMs: MAX_HOLD },
+    );
+    expect(r.signal.kind).toBe("SELL_EXIT_NOW");
+    expect(r.signal.sellPct).toBe(1);
+    expect(r.signal.hard).toBe(true);
+    expect(r.rungsHit).toEqual([]); // ladder never consulted
+  });
+
+  it("distribution / top-holder dump triggers a hard exit", () => {
+    const r = evaluateExit(
+      pos({ peakPriceUsd: 1.2 }),
+      { currentPriceUsd: 1.2, now: 1000, hard: { topHolderDumping: true } },
+      { maxHoldMs: MAX_HOLD },
+    );
+    expect(r.signal.kind).toBe("SELL_EXIT_NOW");
+    expect(r.signal.hard).toBe(true);
+  });
+
+  it("trailing stop locks gains after a run-up (−35% from peak)", () => {
+    const r = evaluateExit(
+      pos({ peakPriceUsd: 5, exitPlan: defaultExitPlan(MAX_HOLD, 0.35) }),
+      { currentPriceUsd: 3, now: 1000 }, // 40% off the 5x peak, still 3x
+      { maxHoldMs: MAX_HOLD },
+    );
+    expect(r.signal.kind).toBe("SELL_EXIT_NOW");
+    expect(r.signal.reason).toMatch(/trailing/i);
+  });
+
+  it("time stop exits the remainder after MAX_HOLD", () => {
+    const r = evaluateExit(
+      pos({ entryAtMs: 0, peakPriceUsd: 1.1 }),
+      { currentPriceUsd: 1.1, now: MAX_HOLD + 1 },
+      { maxHoldMs: MAX_HOLD },
+    );
+    expect(r.signal.kind).toBe("SELL_EXIT_NOW");
+    expect(r.signal.reason).toMatch(/time stop/i);
+  });
+});

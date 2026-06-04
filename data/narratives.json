@@ -1,0 +1,11 @@
+{
+  "_comment": "Live meme-narrative keyword buckets for the free heuristic hype scorer. Edit freely.",
+  "narratives": [
+    { "tag": "animal", "keywords": ["dog", "doge", "cat", "wif", "hat", "inu", "shiba", "shib", "frog", "pepe", "monkey", "ape", "penguin", "pengu", "hippo", "moo", "deng", "duck", "bird", "fwog", "goat", "bull", "bear", "wolf", "sloth"] },
+    { "tag": "political", "keywords": ["trump", "biden", "maga", "boden", "tremp", "kamala", "potus", "president", "vance", "elon"] },
+    { "tag": "ai", "keywords": ["ai", "gpt", "agent", "terminal", "truth", "neural", "llm", "robot", "model", "claude", "grok"] },
+    { "tag": "tech", "keywords": ["sol", "solana", "tesla", "doge", "x", "spacex", "mars", "quantum", "chain"] },
+    { "tag": "culture", "keywords": ["chad", "wojak", "based", "gigachad", "moon", "wagmi", "gm", "ngmi", "cope", "rekt", "degen", "fomo"] },
+    { "tag": "finance", "keywords": ["pump", "rich", "money", "gold", "bank", "fed", "rate", "cash", "billion", "million"] }
+  ]
+}

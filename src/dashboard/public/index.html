@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meme Signal Engine</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">◎</span>
+        <span>Meme Signal Engine</span>
+        <span class="readonly" title="This app never holds a key, never signs, never trades.">READ-ONLY</span>
+      </div>
+      <div class="status" id="status-pills">
+        <span class="pill" id="pill-ws">ws: …</span>
+        <span class="pill" id="pill-live">Live</span>
+        <span class="pill" id="pill-wallet">Wallet: off</span>
+        <span class="pill" id="pill-paper">Paper: off</span>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="signals">Live Signals</button>
+      <button class="tab" data-tab="positions">Open Positions</button>
+      <button class="tab" data-tab="wallet">Wallet Observer</button>
+      <button class="tab" data-tab="journal">Journal</button>
+      <button class="tab" data-tab="paper">Paper Wallet</button>
+      <button class="tab" data-tab="backtest">Backtest</button>
+      <button class="tab" data-tab="learning">Learning</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <main id="main">
+      <section class="panel active" id="tab-signals">
+        <div class="panel-head"><h2>Live Signals</h2><span class="muted" id="signals-meta"></span></div>
+        <div class="cards" id="signals-list"><p class="muted">Waiting for the scanner… new tokens appear here within seconds of launch.</p></div>
+      </section>
+
+      <section class="panel" id="tab-positions">
+        <div class="panel-head"><h2>Open Positions</h2>
+          <div class="seg" id="positions-seg">
+            <button class="seg-btn active" data-status="open">Open</button>
+            <button class="seg-btn" data-status="closed">Closed</button>
+          </div>
+        </div>
+        <div class="cards" id="positions-list"></div>
+      </section>
+
+      <section class="panel" id="tab-wallet">
+        <div class="panel-head"><h2>Wallet Observer</h2></div>
+        <div class="kv" id="wallet-info"></div>
+        <h3>Detected positions</h3>
+        <div class="cards" id="wallet-positions"></div>
+      </section>
+
+      <section class="panel" id="tab-journal">
+        <div class="panel-head"><h2>Journal</h2><span class="muted" id="journal-stats"></span></div>
+        <div class="table-wrap"><table id="journal-table"><thead><tr>
+          <th>Time</th><th>Verdict</th><th>Token</th><th>Conv</th><th>Safety</th><th>Organic</th><th>Mom</th><th>Late</th><th>Max gain</th><th>Reason</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="panel" id="tab-paper">
+        <div class="panel-head"><h2>Paper Wallet</h2>
+          <button class="btn danger" id="paper-reset">Reset Paper Wallet</button>
+        </div>
+        <div class="kv" id="paper-stats"></div>
+        <h3>Open sim positions</h3>
+        <div class="cards" id="paper-open"></div>
+        <h3>Recent sim fills</h3>
+        <div class="table-wrap"><table id="paper-fills"><thead><tr>
+          <th>Time</th><th>Side</th><th>Token</th><th>Price</th><th>SOL</th><th>Realized</th><th>Reason</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="panel" id="tab-backtest">
+        <div class="panel-head"><h2>Backtest</h2></div>
+        <form class="form" id="backtest-form">
+          <p class="muted">Replay journalled signals under alternative thresholds (validated before applying).</p>
+          <label>Min conviction (BUY_STRONG) <input type="number" name="minConvictionBuyStrong" min="0" max="100" /></label>
+          <label>Min organic score <input type="number" name="minOrganicScore" min="0" max="100" /></label>
+          <label>Max late-entry risk <input type="number" name="maxLateEntryRisk" min="0" max="100" /></label>
+          <button class="btn" type="submit">Run backtest</button>
+        </form>
+        <div class="table-wrap"><table id="backtest-table"><thead><tr>
+          <th>Time</th><th>Settings</th><th>Trades</th><th>Win rate</th><th>PnL (SOL)</th><th>Max DD</th><th>Best</th><th>Worst</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="panel" id="tab-learning">
+        <div class="panel-head"><h2>Learning</h2>
+          <div class="seg" id="learning-mode">
+            <button class="seg-btn" data-mode="manual">Manual Review</button>
+            <button class="seg-btn" data-mode="auto">Auto-Tune</button>
+          </div>
+        </div>
+        <h3>Suggestions</h3>
+        <div class="cards" id="learning-suggestions"><p class="muted">No suggestions yet — they appear after a soak.</p></div>
+        <h3>Setting change history</h3>
+        <div class="table-wrap"><table id="learning-history"><thead><tr>
+          <th>Time</th><th>Setting</th><th>From</th><th>To</th><th>By</th><th>Note</th>
+        </tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="panel" id="tab-settings">
+        <div class="panel-head"><h2>Settings</h2><span class="muted" id="settings-saved"></span></div>
+        <form class="form grid" id="settings-form"></form>
+      </section>
+    </main>
+
+    <div id="toasts"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

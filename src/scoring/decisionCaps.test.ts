@@ -1,0 +1,160 @@
+import { describe, it, expect } from "vitest";
+import { decide, type DecisionThresholds } from "./decisionCaps.js";
+import type { ScoreBreakdown, SafetyResult } from "../types.js";
+import { emptyScores } from "../types.js";
+
+const THRESHOLDS: DecisionThresholds = {
+  minConvictionBuySmall: 55,
+  minConvictionBuyStrong: 72,
+  maxLateEntryRisk: 70,
+  minOrganicScore: 55,
+  weights: {
+    organic: 15,
+    momentum: 30,
+    graduation: 12,
+    devReputation: 12,
+    smartMoney: 18,
+    social: 8,
+    hype: 5,
+  },
+};
+
+function safety(pass: boolean, unknownCount = 0, fatalReasons: string[] = []): SafetyResult {
+  return {
+    pass,
+    stage: 1,
+    checks: [],
+    unknownCount,
+    fatalReasons,
+    score: pass ? 80 : 0,
+  };
+}
+
+function scores(p: Partial<ScoreBreakdown>): ScoreBreakdown {
+  return { ...emptyScores(), ...p };
+}
+
+const at = 1_000;
+
+describe("decide() — gate → score → cap → verdict", () => {
+  it("safety fail ⇒ AVOID even with a perfect score everywhere (incl. hype)", () => {
+    const d = decide({
+      mint: "M",
+      scores: scores({
+        organic: 100,
+        momentum: 100,
+        graduation: 100,
+        devReputation: 100,
+        smartMoney: 100,
+        social: 100,
+        hype: 100,
+        lateEntryRisk: 0,
+      }),
+      safety: safety(false, 0, ["mint authority not revoked"]),
+      thresholds: THRESHOLDS,
+      at,
+    });
+    expect(d.verdict).toBe("AVOID");
+    expect(d.conviction).toBe(0);
+    expect(d.reasons[0]).toMatch(/safety gate failed/i);
+  });
+
+  it("clean strong setup ⇒ BUY_STRONG", () => {
+    const d = decide({
+      mint: "M",
+      scores: scores({
+        organic: 80,
+        momentum: 90,
+        graduation: 80,
+        devReputation: 80,
+        smartMoney: 85,
+        social: 70,
+        hype: 60,
+        lateEntryRisk: 10,
+      }),
+      safety: safety(true),
+      thresholds: THRESHOLDS,
+      at,
+    });
+    expect(d.verdict).toBe("BUY_STRONG");
+    expect(d.conviction).toBeGreaterThanOrEqual(72);
+  });
+
+  it("organic < 30 ⇒ AVOID (hard wash-volume floor)", () => {
+    const d = decide({
+      mint: "M",
+      scores: scores({ organic: 20, momentum: 95, smartMoney: 95, graduation: 90 }),
+      safety: safety(true),
+      thresholds: THRESHOLDS,
+      at,
+    });
+    expect(d.verdict).toBe("AVOID");
+    expect(d.flags).toContain("wash-volume");
+  });
+
+  it("organic in [30,45) caps conviction to WATCH band ⇒ WATCH_ONLY", () => {
+    const d = decide({
+      mint: "M",
+      scores: scores({ organic: 40, momentum: 95, smartMoney: 95, graduation: 90, devReputation: 90 }),
+      safety: safety(true),
+      thresholds: THRESHOLDS,
+      at,
+    });
+    expect(d.verdict).toBe("WATCH_ONLY");
+    expect(d.conviction).toBeLessThanOrEqual(49);
+    expect(d.caps.some((c) => c.includes("organic"))).toBe(true);
+  });
+
+  it("lateEntryRisk above max ⇒ TOO_LATE (entry gone even if signal is right)", () => {
+    const d = decide({
+      mint: "M",
+      scores: scores({
+        organic: 70,
+        momentum: 90,
+        smartMoney: 90,
+        graduation: 85,
+        devReputation: 80,
+        lateEntryRisk: 80,
+      }),
+      safety: safety(true),
+      thresholds: THRESHOLDS,
+      at,
+    });
+    expect(d.verdict).toBe("TOO_LATE");
+    expect(d.caps).toContain("lateEntry⇒TOO_LATE");
+  });
+
+  it("≥2 UNKNOWN safety items caps conviction ⇒ at most BUY_SMALL", () => {
+    const d = decide({
+      mint: "M",
+      scores: scores({
+        organic: 75,
+        momentum: 95,
+        smartMoney: 95,
+        graduation: 90,
+        devReputation: 90,
+        social: 80,
+        hype: 80,
+      }),
+      safety: safety(true, 2),
+      thresholds: THRESHOLDS,
+      at,
+    });
+    expect(d.conviction).toBeLessThanOrEqual(59);
+    expect(["BUY_SMALL", "WATCH_ONLY"]).toContain(d.verdict);
+    expect(d.flags).toContain("safety-unknowns");
+  });
+
+  it("AI hype alone cannot force a BUY (small weight by design)", () => {
+    const d = decide({
+      mint: "M",
+      // Everything dead except a maxed AI hype; organic just above the floor.
+      scores: scores({ organic: 46, hype: 100 }),
+      safety: safety(true),
+      thresholds: THRESHOLDS,
+      at,
+    });
+    expect(d.verdict).toBe("AVOID");
+    expect(d.conviction).toBeLessThan(THRESHOLDS.minConvictionBuySmall);
+  });
+});
