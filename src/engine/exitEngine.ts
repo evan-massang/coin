@@ -63,7 +63,7 @@ const HARD_LABELS: Record<keyof HardSignals, string> = {
   distributionDetected: "distribution detected",
 };
 
-export function evaluateExit(p: Position, inp: ExitInputs, cfg: { maxHoldMs: number }): ExitEvaluation {
+export function evaluateExit(p: Position, inp: ExitInputs, cfg: { maxHoldMs: number; stopLossPct?: number }): ExitEvaluation {
   const hold = (kind: ExitSignal["kind"], sellPct: number, reason: string, hard: boolean, rungsHit: number[] = []): ExitEvaluation => ({
     signal: { mint: p.mint, kind, sellPct, reason, hard, at: inp.now },
     rungsHit,
@@ -85,6 +85,13 @@ export function evaluateExit(p: Position, inp: ExitInputs, cfg: { maxHoldMs: num
   // 2. TIME STOP.
   if (cfg.maxHoldMs > 0 && inp.now - p.entryAtMs > cfg.maxHoldMs) {
     return hold("SELL_EXIT_NOW", 1, `Time stop: held > ${Math.round(cfg.maxHoldMs / 60000)}m`, false);
+  }
+
+  // 2b. STOP-LOSS — cut a loser fast (meme coins die fast); without this a -45%
+  //     position bleeds to the 4h time stop. Only fires below entry, so it can
+  //     never cut a winner (the trailing stop handles profitable give-back).
+  if (cfg.stopLossPct && cfg.stopLossPct > 0 && multiple <= 1 - cfg.stopLossPct) {
+    return hold("SELL_EXIT_NOW", 1, `Stop loss: ${Math.round((1 - multiple) * 100)}% below entry`, false);
   }
 
   // 3. TRAILING STOP (only meaningful once in profit).
@@ -178,7 +185,7 @@ export class ExitEngine {
       const evalResult = evaluateExit(
         pos,
         { currentPriceUsd: priceUsd, now, hard: this.opts.hardSignalsFor?.(pos) },
-        { maxHoldMs },
+        { maxHoldMs, stopLossPct: this.svc.settings.get("stopLossPct") },
       );
 
       // Mark fired ladder rungs done so we don't re-alert the same trim.

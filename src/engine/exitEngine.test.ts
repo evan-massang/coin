@@ -77,6 +77,23 @@ describe("evaluateExit", () => {
     expect(r.signal.reason).toMatch(/trailing/i);
   });
 
+  it("stop-loss cuts a loser fast (down 50% ⇒ SELL_EXIT_NOW)", () => {
+    const r = evaluateExit(
+      pos({ peakPriceUsd: 1.1, entryPriceUsd: 1 }),
+      { currentPriceUsd: 0.5, now: 1000 }, // 50% below entry
+      { maxHoldMs: MAX_HOLD, stopLossPct: 0.45 },
+    );
+    expect(r.signal.kind).toBe("SELL_EXIT_NOW");
+    expect(r.signal.reason).toMatch(/stop loss/i);
+  });
+
+  it("stop-loss never cuts a winner, and is off when unset", () => {
+    // up 30% with stop-loss configured ⇒ NOT triggered (above entry)
+    expect(evaluateExit(pos({ peakPriceUsd: 1.3 }), { currentPriceUsd: 1.3, now: 1000 }, { maxHoldMs: MAX_HOLD, stopLossPct: 0.45 }).signal.kind).toBe("HOLD");
+    // down 60% but stop-loss unset (legacy) ⇒ HOLD
+    expect(evaluateExit(pos({ peakPriceUsd: 1 }), { currentPriceUsd: 0.4, now: 1000 }, { maxHoldMs: MAX_HOLD }).signal.kind).toBe("HOLD");
+  });
+
   it("time stop exits the remainder after MAX_HOLD", () => {
     const r = evaluateExit(
       pos({ entryAtMs: 0, peakPriceUsd: 1.1 }),
