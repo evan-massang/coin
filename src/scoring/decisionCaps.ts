@@ -112,16 +112,15 @@ export function decide(input: DecisionInput): Decision {
     caps.push(`organic<${thresholds.minOrganicScore}⇒cap ${ORGANIC_SOFT_CAP}`);
   }
 
-  // Cap conviction only when FATAL-capable safety props (mint/freeze authority)
-  // can't be verified — NOT when paid-only data (holders/bundle) is merely absent.
-  // (Cycle 7: the old all-unknowns count pegged 100% of BUYs at 59.) Falls back to
-  // unknownCount for legacy/backtest rows that predate fatalUnknownCount.
-  const capUnknowns = safety.fatalUnknownCount ?? safety.unknownCount;
-  if (capUnknowns >= 2) {
-    conviction = Math.min(conviction, UNKNOWN_CAP);
-    caps.push(`${capUnknowns} unverified fatal-safety items⇒cap ${UNKNOWN_CAP}`);
-    flags.push("safety-unknowns");
-  }
+  // Safety-data unknowns no longer CAP conviction (Cycle 7). On a pump.fun-only
+  // free feed the unknowns are STRUCTURAL and permanent — authorities are
+  // curve-held (not "revoked"), and holders/bundle/dev-movement need the paid
+  // feed — so counting them pegged 100% of BUYs at 59 and made BUY_STRONG
+  // unreachable. Protection is preserved elsewhere: the safety GATE still AVOIDs
+  // confirmed-bad tokens, the LOW_COVERAGE_CAP below still requires real
+  // DexScreener evidence to BUY, and the risk engine still shrinks position size
+  // when blind. We keep the flag purely for transparency (it's surfaced in the UI).
+  if ((safety.unknownCount ?? 0) >= 2) flags.push("safety-unknowns");
 
   // Real-evidence coverage gate: if too little genuine evidence actually computed
   // (e.g. token scored on <8 trades ⇒ organic/momentum unknown), cap to WATCH so

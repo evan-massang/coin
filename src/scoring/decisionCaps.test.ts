@@ -170,7 +170,11 @@ describe("decide() — gate → score → cap → verdict", () => {
     expect(d.caps).toContain("lateEntry⇒TOO_LATE");
   });
 
-  it("≥2 UNKNOWN safety items caps conviction ⇒ at most BUY_SMALL", () => {
+  it("≥2 UNKNOWN safety items flags but no longer CAPS conviction (Cycle 7)", () => {
+    // On the free feed safety unknowns are structural/permanent; they pegged every
+    // BUY at 59 and made BUY_STRONG unreachable. They now flag (transparency) but
+    // don't cap — a strong clean-gate vector can reach BUY_STRONG. Protection lives
+    // in the gate + LOW_COVERAGE_CAP + risk sizing, not a conviction ceiling.
     const d = decide({
       mint: "M",
       scores: scores({
@@ -186,9 +190,9 @@ describe("decide() — gate → score → cap → verdict", () => {
       thresholds: THRESHOLDS,
       at,
     });
-    expect(d.conviction).toBeLessThanOrEqual(59);
-    expect(["BUY_SMALL", "WATCH_ONLY"]).toContain(d.verdict);
-    expect(d.flags).toContain("safety-unknowns");
+    expect(d.flags).toContain("safety-unknowns"); // still surfaced for transparency
+    expect(d.conviction).toBeGreaterThan(59); // no longer pegged at 59
+    expect(d.verdict).toBe("BUY_STRONG"); // strong vector can now reach it
   });
 
   it("AI hype alone cannot force a BUY (small weight by design)", () => {
