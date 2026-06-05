@@ -17,7 +17,7 @@ svc.settings.update(
       { id: "llama", label: "Llama 3.2", role: "narrative_analyst", provider: "opencode", model: "ollama/llama3.2:3b", enabled: true },
       { id: "gemma", label: "Gemma 2", role: "risk_analyst", provider: "opencode", model: "ollama/gemma2:2b", enabled: true },
       { id: "phi", label: "Phi 3.5", role: "contrarian", provider: "opencode", model: "ollama/phi3.5", enabled: true },
-      { id: "deepseek", label: "DeepSeek R1", role: "lead_reviewer", provider: "opencode", model: "ollama/deepseek-r1:1.5b", enabled: true },
+      { id: "qwen-lead", label: "Qwen 1.5B", role: "lead_reviewer", provider: "opencode", model: "ollama/qwen2.5:1.5b", enabled: true },
     ],
   },
   "user",

@@ -84,6 +84,8 @@ export const SettingsSchema = z.object({
   opencodeBin: z.string().default("opencode"),
   /** Fallback model for any OpenCode seat that doesn't pin its own. */
   opencodeModel: z.string().default("openai/gpt-4o"),
+  /** Local Ollama server — `ollama/*` council seats talk to it directly (tool-less). */
+  ollamaBaseUrl: z.string().default("http://127.0.0.1:11434"),
   /** The council roster (seats, roles, providers, models, enabled). */
   councilMembers: z.array(CouncilMemberConfigSchema).default(DEFAULT_COUNCIL),
 });

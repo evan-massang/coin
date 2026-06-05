@@ -45,7 +45,7 @@ export async function opencodeReview(
       tools: DISABLED_TOOLS,
       parts: [{ type: "text", text: `Evidence:\n${buildEvidencePrompt(evidence)}\n\nReview as strict JSON from your seat.` }],
     },
-    opts.timeoutMs ?? 30000,
+    opts.timeoutMs ?? 90000, // generous: a cold local CPU model load + generate
   )) as { parts?: Array<{ type?: string; text?: string }> } | undefined;
 
   if (!msg || !Array.isArray(msg.parts)) return undefined;

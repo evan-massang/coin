@@ -11,6 +11,7 @@ import { saveScreenshot } from "./screenshotEvidence.js";
 import { checkAction } from "./actionPolicy.js";
 import { anthropicReview } from "./council.js";
 import { opencodeReview } from "./opencodeCouncil.js";
+import { ollamaReview } from "./ollamaCouncil.js";
 import { OpencodeServer } from "./opencodeServer.js";
 import { buildEvidencePrompt, type CouncilEvidence, type CouncilMemberResult, type CouncilVerdict } from "./councilShared.js";
 import { evidenceFromIntel, sparseEvidence } from "../council/evidence.js";
@@ -112,7 +113,8 @@ export class AiComputer {
     // 2. Convene the council over the engine's interpreted evidence (not raw data).
     const evidence = this.councilEvidence(mint);
     const roster = this.activeRoster();
-    const needsOpencode = roster.some((m) => m.provider === "opencode");
+    // Local `ollama/*` seats talk to Ollama directly — only remote seats need OpenCode.
+    const needsOpencode = roster.some((m) => m.provider === "opencode" && !m.model.startsWith("ollama/"));
     const baseUrl = needsOpencode
       ? await this.opencode.ensure({
           enabled: this.settings.get("opencodeEnabled"),
@@ -122,10 +124,13 @@ export class AiComputer {
         })
       : undefined;
 
-    const settled = await Promise.allSettled(roster.map((m) => this.runMember(m, evidence, baseUrl)));
-    const members = settled
-      .map((r) => (r.status === "fulfilled" ? r.value : undefined))
-      .filter((x): x is CouncilMemberResult => !!x);
+    // Sequential, not parallel: local CPU models serialize through Ollama anyway,
+    // and going one-at-a-time means a slow seat can't make queued seats time out.
+    const members: CouncilMemberResult[] = [];
+    for (const m of roster) {
+      const r = await this.runMember(m, evidence, baseUrl).catch(() => undefined);
+      if (r) members.push(r);
+    }
 
     const consensus = buildConsensus(members, evidence, this.councilJournal.weights());
     const council: CouncilVerdict | undefined = consensus
@@ -167,6 +172,8 @@ export class AiComputer {
     let v: CouncilVerdict | undefined;
     if (m.provider === "anthropic") {
       v = await anthropicReview(evidence, { apiKey: this.settings.get("anthropicApiKey") || undefined, role: m.role, model: m.model || undefined });
+    } else if (m.provider === "opencode" && m.model.startsWith("ollama/")) {
+      v = await ollamaReview(evidence, { baseUrl: this.settings.get("ollamaBaseUrl"), model: m.model, role: m.role });
     } else if (m.provider === "opencode" && baseUrl) {
       v = await opencodeReview(evidence, { baseUrl, model: m.model || this.settings.get("opencodeModel"), role: m.role });
     }
