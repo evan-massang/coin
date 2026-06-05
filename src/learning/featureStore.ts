@@ -1,7 +1,6 @@
 import type { Services } from "../services.js";
 import type { FeatureRecord } from "../types.js";
-import { fetchDexSnapshot } from "../sources/dexscreener.js";
-import { RateLimiter } from "../util/rateLimiter.js";
+import { fetchDexSnapshots } from "../sources/dexscreener.js";
 import { log } from "../util/logger.js";
 
 // §1.12 feature store + outcome tracking. The journal records a signal at alert
@@ -20,17 +19,14 @@ export class FeatureStore {
 export interface OutcomeOptions {
   intervalMs?: number;
   resolveAfterMs?: number;
-  maxPerTick?: number;
 }
 
 export class OutcomeTracker {
   private readonly store: FeatureStore;
   private readonly peaks = new Map<number, { peak: number; trough: number }>();
   private readonly recorded = new Set<number>();
-  private readonly limiter = new RateLimiter(4);
   private readonly intervalMs: number;
   private readonly resolveAfterMs: number;
-  private readonly maxPerTick: number;
   private timer?: NodeJS.Timeout;
 
   constructor(
@@ -39,8 +35,8 @@ export class OutcomeTracker {
   ) {
     this.store = new FeatureStore(svc);
     this.intervalMs = opts.intervalMs ?? 30_000;
-    this.resolveAfterMs = opts.resolveAfterMs ?? 60 * 60_000;
-    this.maxPerTick = opts.maxPerTick ?? 8;
+    // 65m (not 60) so the 1h sample at min>=60 has a window to write before finalize.
+    this.resolveAfterMs = opts.resolveAfterMs ?? 65 * 60_000;
   }
 
   start(): void {
@@ -55,29 +51,32 @@ export class OutcomeTracker {
   private async tick(): Promise<void> {
     const now = Date.now();
     // Time-windowed (not recent(150)) so high signal volume can't age a fresh
-    // BUY out before its 5/15/60-min horizon. Price BUYs before WATCH so the
-    // rare, important traded positions never lose their pricing slot to noise.
-    const rank = (v: string) => (v === "BUY_STRONG" || v === "BUY_SMALL" ? 1 : 0);
-    const recent = this.svc.signals
+    // BUY out before its 5/15/60-min horizon.
+    const candidates = this.svc.signals
       .recentForTracking(this.resolveAfterMs + 5 * 60_000, now)
-      .filter((s) => !this.recorded.has(s.id) && s.priceAtAlert && s.priceAtAlert > 0)
-      .sort((a, b) => rank(b.verdict) - rank(a.verdict));
+      .filter((s) => !this.recorded.has(s.id) && s.priceAtAlert && s.priceAtAlert > 0);
 
-    let priced = 0;
-    for (const s of recent) {
+    // Batch-price EVERY tracked signal (≤30/call). The old per-signal throttle
+    // (maxPerTick=8 + a 4/sec limiter) priced only the newest handful each tick,
+    // so price5m landed but aging signals were starved and price15m/price1h
+    // never wrote (monitor proved p15/p1h stayed 0). Batching fills the full path.
+    const toPrice = candidates.filter((s) => now - s.at <= this.resolveAfterMs);
+    const prices = toPrice.length
+      ? await fetchDexSnapshots(toPrice.map((s) => s.mint)).catch(() => new Map())
+      : new Map();
+
+    for (const s of candidates) {
       const elapsed = now - s.at;
       if (elapsed > this.resolveAfterMs) {
         this.finalize(s.id, s, now);
         continue;
       }
-      if (priced >= this.maxPerTick || !this.limiter.tryAcquire()) continue;
-      priced++;
-      const snap = await fetchDexSnapshot(s.mint).catch(() => undefined);
-      if (!snap?.priceUsd) continue;
+      const priceUsd = prices.get(s.mint)?.priceUsd as number | undefined;
+      if (priceUsd === undefined) continue;
 
       const track = this.peaks.get(s.id) ?? { peak: s.priceAtAlert!, trough: s.priceAtAlert! };
-      track.peak = Math.max(track.peak, snap.priceUsd);
-      track.trough = Math.min(track.trough, snap.priceUsd);
+      track.peak = Math.max(track.peak, priceUsd);
+      track.trough = Math.min(track.trough, priceUsd);
       this.peaks.set(s.id, track);
 
       const maxGainPct = (track.peak / s.priceAtAlert! - 1) * 100;
@@ -87,9 +86,9 @@ export class OutcomeTracker {
         maxDrawdownPct,
       };
       const min = elapsed / 60_000;
-      if (min >= 5 && s.price5m == null) path.price5m = snap.priceUsd;
-      if (min >= 15 && s.price15m == null) path.price15m = snap.priceUsd;
-      if (min >= 60 && s.price1h == null) path.price1h = snap.priceUsd;
+      if (min >= 5 && s.price5m == null) path.price5m = priceUsd;
+      if (min >= 15 && s.price15m == null) path.price15m = priceUsd;
+      if (min >= 60 && s.price1h == null) path.price1h = priceUsd;
       this.svc.signals.updatePricePath(s.id, path);
     }
   }
