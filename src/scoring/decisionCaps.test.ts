@@ -195,6 +195,22 @@ describe("decide() — gate → score → cap → verdict", () => {
     expect(d.verdict).toBe("BUY_STRONG"); // strong vector can now reach it
   });
 
+  it("momentum floor holds a would-be BUY to WATCH when momentum < floor (Cycle 7 edge)", () => {
+    const strong = {
+      organic: 80, momentum: 70, graduation: 80, devReputation: 80, smartMoney: 85, social: 70, hype: 60, lateEntryRisk: 10,
+    };
+    // No floor ⇒ this strong vector BUYs.
+    const noFloor = decide({ mint: "M", at, scores: scores(strong), safety: safety(true), thresholds: THRESHOLDS });
+    expect(["BUY_SMALL", "BUY_STRONG"]).toContain(noFloor.verdict);
+    // Floor 85 with momentum 70 ⇒ held to WATCH, flagged.
+    const floored = decide({ mint: "M", at, scores: scores(strong), safety: safety(true), thresholds: { ...THRESHOLDS, minMomentumForBuy: 85 } });
+    expect(floored.verdict).toBe("WATCH_ONLY");
+    expect(floored.flags).toContain("low-momentum");
+    // Floor 85 with momentum 90 ⇒ still BUYs (above the floor).
+    const passes = decide({ mint: "M", at, scores: scores({ ...strong, momentum: 90 }), safety: safety(true), thresholds: { ...THRESHOLDS, minMomentumForBuy: 85 } });
+    expect(["BUY_SMALL", "BUY_STRONG"]).toContain(passes.verdict);
+  });
+
   it("AI hype alone cannot force a BUY (small weight by design)", () => {
     const d = decide({
       mint: "M",

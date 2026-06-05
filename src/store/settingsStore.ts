@@ -74,6 +74,11 @@ export const SettingsSchema = z.object({
   //    audit showed coin "age" is unverifiable today (tokens.created_at is faked). ──
   observeWindowSec: z.number().int().min(60).max(1800).default(90),
   minObserveSec: z.number().int().min(15).max(900).default(25),
+  /** Min momentum facet to allow a BUY (0 = off). Cycle-7 audit found momentum≥85
+   *  ~doubles the 2x hit-rate (15% vs 6.5%, significant, out-of-sample). Default OFF
+   *  pending ≥1 week of multi-regime data (the audit's sample was one 3.7h window);
+   *  set to 85 in CONFIG to enable the selection edge. */
+  minMomentumForBuy: z.number().min(0).max(100).default(0),
   /** Facets below this confidence are dropped from the conviction blend. Floored at 0.5. */
   convictionConfidenceFloor: z.number().min(0.5).max(0.95).default(0.5),
   /** If real-evidence coverage (excl. social/hype) is below this, conviction is capped to WATCH. */

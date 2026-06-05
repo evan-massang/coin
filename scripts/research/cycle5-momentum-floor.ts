@@ -43,7 +43,7 @@ const gate = LEAGUE_STRATEGIES[0]!.thresholds;
 
 p(`backtest at UNCHANGED gate 55/72, with an added momentum>=floor pre-filter:`);
 p(`floor | trades | win%  | pnl/notional | winners-kept`);
-for (const floor of [0, 20, 30, 40, 50, 60, 70]) {
+for (const floor of [0, 50, 60, 70, 75, 80, 83, 85, 88]) {
   const kept = rows.filter((r) => momOf(r) >= floor);
   const winnersKept = kept.filter(isWin).length;
   const res = runBacktest(kept.map(toHist), gate, 1);

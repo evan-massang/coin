@@ -538,6 +538,7 @@ const CFG = [
   { k: "paperEnabled", label: "paper trading", t: "checkbox" },
   { k: "paperStartingBalanceSol", label: "paper start (SOL)", t: "number" },
   { k: "minConviction", label: "min conviction notify", t: "number" },
+  { k: "minMomentumForBuy", label: "min momentum for BUY (0=off; 85=audit edge)", t: "number" },
   { k: "riskMode", label: "risk mode", t: "select", opts: ["microfish", "fixed"] },
   { k: "heliusApiKey", label: "helius key", t: "secret" },
   { k: "anthropicApiKey", label: "anthropic key (Claude seat)", t: "secret" },

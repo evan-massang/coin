@@ -29,6 +29,9 @@ export interface DecisionThresholds {
   maxLateEntryRisk: number;
   /** User's minimum organic score; below it (but ≥ WATCH band) soft-caps conviction. */
   minOrganicScore: number;
+  /** Min momentum facet to allow a BUY (Cycle 7 audit edge: momentum≥85 ≈2× the 2x
+   *  hit-rate). 0 = off. Below it, a would-be BUY is held to WATCH. */
+  minMomentumForBuy?: number;
   weights: ConvictionWeights;
 }
 
@@ -130,6 +133,17 @@ export function decide(input: DecisionInput): Decision {
     conviction = Math.min(conviction, LOW_COVERAGE_CAP);
     caps.push(`low-coverage(${Math.round(rc * 100)}%)⇒cap ${LOW_COVERAGE_CAP}`);
     flags.push("low-coverage");
+  }
+
+  // Momentum floor (Cycle 7 audit edge): hold a would-be BUY to WATCH if its
+  // momentum is below the floor. Audit: momentum≥85 ≈ doubles the 2x hit-rate
+  // (significant, holds out-of-sample). Off (0) by default — flip on after ≥1wk
+  // of multi-regime data confirms it (the audit's window was one 3.7h session).
+  const momFloor = thresholds.minMomentumForBuy ?? 0;
+  if (momFloor > 0 && scores.momentum < momFloor && conviction >= thresholds.minConvictionBuySmall) {
+    conviction = Math.min(conviction, thresholds.minConvictionBuySmall - 1);
+    caps.push(`momentum ${Math.round(scores.momentum)}<${momFloor}⇒WATCH`);
+    flags.push("low-momentum");
   }
 
   // Map capped conviction → verdict.

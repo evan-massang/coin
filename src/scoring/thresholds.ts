@@ -8,6 +8,7 @@ export function thresholdsFromSettings(s: Settings): DecisionThresholds {
     minConvictionBuyStrong: s.minConvictionBuyStrong,
     maxLateEntryRisk: s.maxLateEntryRisk,
     minOrganicScore: s.minOrganicScore,
+    minMomentumForBuy: s.minMomentumForBuy,
     weights: {
       organic: s.weightOrganic,
       momentum: s.weightMomentum,
