@@ -2,8 +2,7 @@ import type { Decision, ExitPlan, ExitSignal, LadderRung, Position, PositionSour
 import { emptyScores } from "../types.js";
 import type { Services } from "../services.js";
 import type { PositionsRepo } from "../store/repositories/positionsRepo.js";
-import { fetchDexSnapshot } from "../sources/dexscreener.js";
-import { RateLimiter } from "../util/rateLimiter.js";
+import { fetchDexSnapshots } from "../sources/dexscreener.js";
 import { log } from "../util/logger.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,8 +145,8 @@ export class ExitEngine {
   private readonly repo: PositionsRepo;
   private readonly source: PositionSource;
   private readonly intervalMs: number;
-  private readonly priceLimiter = new RateLimiter(4);
   private readonly exitedOnce = new Set<number>(); // throttle repeat EXIT_NOW alerts
+  private ticking = false; // guard against overlapping ticks (batched pricing can be slow)
   private timer?: NodeJS.Timeout;
 
   constructor(
@@ -169,13 +168,27 @@ export class ExitEngine {
   }
 
   async tick(): Promise<void> {
+    if (this.ticking) return; // a slow batch-priced tick is still running
+    this.ticking = true;
+    try {
+      await this.runTick();
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  private async runTick(): Promise<void> {
     const open = this.repo.byStatus(true);
     if (open.length === 0) return;
     const maxHoldMs = this.svc.settings.get("maxHoldMinutes") * 60_000;
     const now = Date.now();
 
+    // Price EVERY open position this tick (batched, ≤30/call) so a fast crash is
+    // caught near the stop-loss threshold, not 30-60s later at −85%.
+    const prices = await fetchDexSnapshots(open.map((p) => p.mint)).catch(() => new Map());
+
     for (const pos of open) {
-      const priceUsd = await this.priceFor(pos.mint);
+      const priceUsd = prices.get(pos.mint)?.priceUsd;
       if (priceUsd === undefined) continue;
 
       // Track peak/last for the trailing stop.
@@ -211,12 +224,6 @@ export class ExitEngine {
       this.svc.dispatcher.dispatch(this.sellDecision(pos, sig));
       this.opts.onExit?.(pos, sig);
     }
-  }
-
-  private async priceFor(mint: string): Promise<number | undefined> {
-    if (!this.priceLimiter.tryAcquire()) return undefined;
-    const snap = await fetchDexSnapshot(mint).catch(() => undefined);
-    return snap?.priceUsd;
   }
 
   private sellDecision(pos: Position, sig: ExitSignal): Decision {
