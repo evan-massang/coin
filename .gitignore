@@ -36,3 +36,6 @@ ruvector.db
 
 # AI Computer screenshot evidence (runtime data)
 data/evidence/
+
+# Generated reasoning transcript (runtime data)
+transcript*.txt
