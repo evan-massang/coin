@@ -146,6 +146,23 @@ a { color: var(--green-2); text-decoration: none; cursor: pointer; }
 .paper-cols .feed td, .paper-cols .feed th { padding: 5px 6px; }
 .paper-cols .feed tr { cursor: default; }
 
+/* ── reasoning feed (live why-it-buys/sells) ── */
+.reasongrid { margin-bottom: 12px; }
+.rz-filters { display: flex; gap: 6px; margin-bottom: 8px; }
+.rz-f { font-family: var(--pixel); font-size: 7px; padding: 4px 7px; border: 1px solid var(--line-2); border-radius: 3px; color: var(--muted); cursor: pointer; }
+.rz-f:hover { border-color: var(--green); }
+.rz-f.rz-on { color: var(--ink); border-color: var(--ink); background: var(--panel-2); }
+.rz-feed { max-height: 360px; overflow-y: auto; border-top: 1px dotted var(--line-2); }
+.rz-row { padding: 7px 2px; border-bottom: 1px dotted var(--line-2); }
+.rz-row.rz-council { background: #f1ede0; border-left: 3px solid var(--blue); padding-left: 8px; }
+.rz-row.rz-buy { border-left: 3px solid var(--green); padding-left: 8px; }
+.rz-row.rz-sell { border-left: 3px solid var(--red); padding-left: 8px; }
+.rz-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 16px; }
+.rz-ic { font-size: 13px; }
+.rz-k { font-family: var(--pixel); font-size: 7px; }
+.rz-t { margin-left: auto; font-size: 13px; }
+.rz-line { font-size: 14px; color: var(--ink); margin: 3px 0 0 18px; padding-left: 8px; border-left: 1px solid var(--line-2); }
+
 /* ── evidence / conflict / timeline row ── */
 .botgrid { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
 .ev-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

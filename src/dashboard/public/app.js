@@ -69,7 +69,7 @@ async function loadAll() {
   ]);
   STATE.status = status; STATE.market = market; STATE.engine = engine; STATE.council = council; STATE.councilStats = councilStats;
   STATE.signals = (signals || []).map((s) => ({ ...s, verdict: s.verdict })).reverse();
-  renderEngineState(); renderRegime(); renderCouncil(); renderTable(); renderAlerts(); renderPaper();
+  renderEngineState(); renderRegime(); renderCouncil(); renderTable(); renderAlerts(); renderPaper(); renderReasoning();
   // Default selection = highest-conviction recent token.
   if (!STATE.selectedMint && STATE.signals.length) selectToken((topSignal() || STATE.signals[STATE.signals.length - 1]).mint);
   else if (STATE.selectedMint) refreshSelected();
@@ -424,6 +424,26 @@ async function renderPaper() {
     : `<tr><td colspan="4" class="muted small">no closed trades yet</td></tr>`;
 }
 
+// ── reasoning feed (live "why it buys / sells / avoids") ──
+const RZ = { kind: "all" };
+function rzIcon(k) { return k === "council" ? "🧠" : k === "buy" ? "🟢" : k === "sell" ? "🔴" : "⚪"; }
+function rzRow(it) {
+  const toneCol = it.tone === "bull" ? "green" : it.tone === "bear" ? "red" : "gold";
+  const pnl = it.pnlSol != null ? ` <span class="${it.pnlSol >= 0 ? "green" : "red"}">${it.pnlSol >= 0 ? "+" : ""}${it.pnlSol.toFixed(3)} SOL</span>` : "";
+  const lines = (it.lines || []).map((l) => `<div class="rz-line">${esc(l)}</div>`).join("");
+  return `<div class="rz-row rz-${it.kind}">
+    <div class="rz-head"><span class="rz-ic">${rzIcon(it.kind)}</span> <b>$${esc(it.symbol)}</b> <span class="rz-k ${toneCol}">${esc(it.headline)}</span>${pnl} <span class="rz-t muted">${ageStr(it.at)}</span></div>
+    ${lines}
+  </div>`;
+}
+async function renderReasoning() {
+  const r = await api("/reasoning?limit=70").catch(() => null);
+  const el = $("#rz-feed");
+  if (!el || !r || !r.feed) return;
+  const feed = RZ.kind === "all" ? r.feed : r.feed.filter((x) => x.kind === RZ.kind);
+  el.innerHTML = feed.length ? feed.map(rzRow).join("") : `<div class="muted small">no ${RZ.kind === "all" ? "" : RZ.kind + " "}activity yet — the engine + council fill this as coins are scored</div>`;
+}
+
 // ── ticker ──
 function renderAlerts() {
   const recent = STATE.signals.slice(-8).reverse();
@@ -510,6 +530,12 @@ $("#close-config").onclick = () => $("#config").classList.remove("open");
 $("#open-room").onclick = openCouncilRoom;
 $("#close-room").onclick = () => $("#room").classList.remove("open");
 $("#pw-reset").onclick = async () => { if (!confirm("Reset the paper wallet to its starting balance? This clears all simulated positions.")) return; await api("/paper/reset", { method: "POST" }); renderPaper(); };
+$("#rz-filters").onclick = (e) => {
+  const f = e.target.closest(".rz-f"); if (!f) return;
+  RZ.kind = f.getAttribute("data-k");
+  document.querySelectorAll("#rz-filters .rz-f").forEach((x) => x.classList.toggle("rz-on", x === f));
+  renderReasoning();
+};
 $("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — the Council Room updates shortly` : `error: ${r.error}`; };
 
 (async function boot() {

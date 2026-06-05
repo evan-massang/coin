@@ -5,6 +5,7 @@ import { buildLinks } from "../alerts/templates.js";
 import { getMarketMacro } from "../sources/coingecko.js";
 import { fetchMarketWeather } from "../agents/marketWeather.js";
 import { classifyRegime } from "../graph/marketRegime.js";
+import { buildReasoningFeed, buildReasoningReport } from "./reasoning.js";
 
 /** Core read API: status, journal/signals, positions, tokens. */
 export function coreRoutes(svc: Services): Router {
@@ -48,6 +49,22 @@ export function coreRoutes(svc: Services): Router {
 
   r.get("/journal/stats", (_req, res) => {
     res.json(svc.signals.stats());
+  });
+
+  // Live "Reasoning Feed": merged, newest-first stream of WHY the engine + AI
+  // council bought / sold / avoided each coin (powers the dashboard panel).
+  r.get("/reasoning", (req, res) => {
+    const limit = clampInt(req.query.limit, 60, 1, 300);
+    res.json({ feed: buildReasoningFeed(svc, limit) });
+  });
+
+  // Same content as a downloadable plain-text report (the "Download report" button).
+  r.get("/reasoning/report", (req, res) => {
+    const limit = clampInt(req.query.limit, 80, 1, 500);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="coin-ai-reasoning-${stamp}.txt"`);
+    res.send(buildReasoningReport(svc, limit));
   });
 
   // Market weather + macro (SOL/BTC 24h) + classified regime for the regime panel.
