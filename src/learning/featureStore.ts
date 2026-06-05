@@ -85,9 +85,15 @@ export class OutcomeTracker {
         maxGainPct,
         maxDrawdownPct,
       };
+      // Sample only NEAR each horizon — never backfill a stale price into a slot
+      // whose window already passed (e.g. a signal first priced late, after a
+      // restart). A NULL (honestly missing) sample beats a wrong one: otherwise
+      // price_5m and price_15m get the same forwarded price and the 5m/15m
+      // distinction is fiction. The tracker prices every ~30s, so a live signal
+      // always lands inside these windows.
       const min = elapsed / 60_000;
-      if (min >= 5 && s.price5m == null) path.price5m = priceUsd;
-      if (min >= 15 && s.price15m == null) path.price15m = priceUsd;
+      if (min >= 5 && min < 12 && s.price5m == null) path.price5m = priceUsd;
+      if (min >= 15 && min < 25 && s.price15m == null) path.price15m = priceUsd;
       if (min >= 60 && s.price1h == null) path.price1h = priceUsd;
       this.svc.signals.updatePricePath(s.id, path);
     }
