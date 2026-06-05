@@ -124,6 +124,23 @@ export class SignalsRepo {
     return rows.map(rowToSignal);
   }
 
+  /**
+   * BUY/WATCH signals from the last `windowMs` — what the outcome tracker
+   * re-prices to fill the forward path (5m/15m/1h samples + max gain/drawdown).
+   * Time-windowed, NOT a fixed count: during bursts the engine emits >150
+   * signals in minutes, so a count window (recent(150)) ages a fresh BUY out
+   * before its 5-minute horizon and the path samples are never written. AVOIDs
+   * are excluded (never traded, not tracked). Newest first.
+   */
+  recentForTracking(windowMs: number, now: number): SignalRecord[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM signals WHERE at >= ? AND verdict IN ('BUY_SMALL','BUY_STRONG','WATCH_ONLY') ORDER BY at DESC",
+      )
+      .all(now - windowMs) as Record<string, unknown>[];
+    return rows.map(rowToSignal);
+  }
+
   stats(): JournalStats {
     const total = (this.db.prepare("SELECT COUNT(*) AS n FROM signals").get() as { n: number }).n;
     const byRows = this.db

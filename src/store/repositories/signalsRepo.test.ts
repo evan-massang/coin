@@ -66,3 +66,29 @@ describe("SignalsRepo.buyStats", () => {
     expect(repo.buyStats().samples).toBe(0);
   });
 });
+
+describe("SignalsRepo.recentForTracking", () => {
+  let db: DB;
+  let repo: SignalsRepo;
+  beforeEach(() => {
+    db = openDb(":memory:");
+    repo = new SignalsRepo(db);
+  });
+  afterEach(() => db.close());
+
+  it("returns BUY/WATCH within the time window, excludes AVOID and stale rows", () => {
+    const now = 10_000_000;
+    repo.insert(decision({ mint: "BUY_RECENT", verdict: "BUY_SMALL", at: now - 10 * 60_000 }));
+    repo.insert(decision({ mint: "WATCH_RECENT", verdict: "WATCH_ONLY", at: now - 30 * 60_000 }));
+    repo.insert(decision({ mint: "AVOID_RECENT", verdict: "AVOID", at: now - 60_000 })); // wrong verdict
+    repo.insert(decision({ mint: "BUY_STALE", verdict: "BUY_STRONG", at: now - 2 * 60 * 60_000 })); // outside window
+
+    const got = repo.recentForTracking(60 * 60_000, now).map((s) => s.mint);
+    expect(got).toContain("BUY_RECENT");
+    expect(got).toContain("WATCH_RECENT");
+    expect(got).not.toContain("AVOID_RECENT");
+    expect(got).not.toContain("BUY_STALE");
+    // newest-first
+    expect(got[0]).toBe("BUY_RECENT");
+  });
+});

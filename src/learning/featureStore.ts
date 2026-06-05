@@ -54,15 +54,14 @@ export class OutcomeTracker {
 
   private async tick(): Promise<void> {
     const now = Date.now();
+    // Time-windowed (not recent(150)) so high signal volume can't age a fresh
+    // BUY out before its 5/15/60-min horizon. Price BUYs before WATCH so the
+    // rare, important traded positions never lose their pricing slot to noise.
+    const rank = (v: string) => (v === "BUY_STRONG" || v === "BUY_SMALL" ? 1 : 0);
     const recent = this.svc.signals
-      .recent(150)
-      .filter(
-        (s) =>
-          !this.recorded.has(s.id) &&
-          s.priceAtAlert &&
-          s.priceAtAlert > 0 &&
-          ["BUY_SMALL", "BUY_STRONG", "WATCH_ONLY"].includes(s.verdict),
-      );
+      .recentForTracking(this.resolveAfterMs + 5 * 60_000, now)
+      .filter((s) => !this.recorded.has(s.id) && s.priceAtAlert && s.priceAtAlert > 0)
+      .sort((a, b) => rank(b.verdict) - rank(a.verdict));
 
     let priced = 0;
     for (const s of recent) {
