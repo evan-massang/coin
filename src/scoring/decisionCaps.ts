@@ -112,9 +112,14 @@ export function decide(input: DecisionInput): Decision {
     caps.push(`organic<${thresholds.minOrganicScore}⇒cap ${ORGANIC_SOFT_CAP}`);
   }
 
-  if (safety.unknownCount >= 2) {
+  // Cap conviction only when FATAL-capable safety props (mint/freeze authority)
+  // can't be verified — NOT when paid-only data (holders/bundle) is merely absent.
+  // (Cycle 7: the old all-unknowns count pegged 100% of BUYs at 59.) Falls back to
+  // unknownCount for legacy/backtest rows that predate fatalUnknownCount.
+  const capUnknowns = safety.fatalUnknownCount ?? safety.unknownCount;
+  if (capUnknowns >= 2) {
     conviction = Math.min(conviction, UNKNOWN_CAP);
-    caps.push(`${safety.unknownCount} unknown safety items⇒cap ${UNKNOWN_CAP}`);
+    caps.push(`${capUnknowns} unverified fatal-safety items⇒cap ${UNKNOWN_CAP}`);
     flags.push("safety-unknowns");
   }
 

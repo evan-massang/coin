@@ -58,12 +58,17 @@ function check(id: string, label: string, status: SafetyCheck["status"], fatal: 
 function finalize(checks: SafetyCheck[], stage: 0 | 1): SafetyResult {
   const fatalReasons = checks.filter((c) => c.fatal && c.status === "FAIL").map((c) => c.detail ?? c.label);
   const unknownCount = checks.filter((c) => c.status === "UNKNOWN").length;
+  // Only FATAL-capable unknowns (mint/freeze authority) cap conviction. The
+  // non-fatal unknowns (holder %, bundle, rugcheck, dev-movement, fresh-wallets)
+  // are unavailable on the free feed for EVERY token, so counting them pegged
+  // every BUY at 59 and made BUY_STRONG unreachable (Cycle 7 audit).
+  const fatalUnknownCount = checks.filter((c) => c.status === "UNKNOWN" && c.fatal).length;
   const pass = fatalReasons.length === 0;
   // Informational score: PASS=+, UNKNOWN=neutral-ish, FAIL=−, scaled to 0..100.
   const scored = checks.filter((c) => c.status !== "UNKNOWN");
   const passes = scored.filter((c) => c.status === "PASS").length;
   const score = scored.length ? Math.round((passes / scored.length) * 100) : 50;
-  return { pass, stage, checks, unknownCount, fatalReasons, score };
+  return { pass, stage, checks, unknownCount, fatalUnknownCount, fatalReasons, score };
 }
 
 export function evaluateStage0(inp: Stage0Inputs, cfg: SafetyConfig): SafetyResult {

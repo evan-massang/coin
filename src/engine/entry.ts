@@ -84,8 +84,10 @@ export class EntryPipeline {
     private readonly pump: PumpPortalClient,
     opts: EntryOptions = {},
   ) {
-    this.observeMs = opts.observeMs ?? 90_000;
-    this.minObserveMs = opts.minObserveMs ?? 25_000;
+    // Observe-longer maturity gate (Cycle 7): decide on 2-5min-mature coins, not
+    // seconds-old newborns. Settings-driven (tunable in CONFIG); opts win in tests.
+    this.observeMs = opts.observeMs ?? this.svc.settings.get("observeWindowSec") * 1000;
+    this.minObserveMs = opts.minObserveMs ?? this.svc.settings.get("minObserveSec") * 1000;
     this.minTradesToScore = opts.minTradesToScore ?? 8;
     this.stage0BudgetMs = opts.stage0BudgetMs ?? 1500;
     this.hooks = opts.hooks ?? {};

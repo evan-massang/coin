@@ -97,8 +97,14 @@ export interface SafetyResult {
   /** 0 = sub-second hard kill; 1 = post-observation promotion gate. */
   stage: 0 | 1;
   checks: SafetyCheck[];
-  /** Number of UNKNOWN checks — drives a conviction cap (§1.6). */
+  /** Number of UNKNOWN checks (all) — drives the risk-sizing unknowns penalty. */
   unknownCount: number;
+  /** UNKNOWN checks that are FATAL-capable (mint/freeze authority) — drives the
+   *  conviction cap. Non-fatal unknowns (holder %, bundle, dev-movement…) are
+   *  structurally unavailable on the free feed and must NOT permanently cap
+   *  conviction (that pegged 100% of BUYs at 59 / made BUY_STRONG unreachable).
+   *  Optional: legacy/backtest rows fall back to unknownCount for the cap. */
+  fatalUnknownCount?: number;
   /** Reasons a fatal check failed (for the alert + journal). */
   fatalReasons: string[];
   /** 0 (toxic) .. 100 (clean) — informational; the gate is `pass`, not this. */

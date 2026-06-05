@@ -69,6 +69,11 @@ export const SettingsSchema = z.object({
   // ── Evidence sufficiency (Cycle 1 fix — NOT auto-tunable; structural safety) ──
   /** Min observed trades before organic/momentum carry confidence. Floored at 8. */
   minBuysToDecide: z.number().int().min(8).max(50).default(8),
+  // ── Observation timing (tunable; defaults = current behavior). Longer windows
+  //    are a candidate for later — NOT shipped as a default change because the
+  //    audit showed coin "age" is unverifiable today (tokens.created_at is faked). ──
+  observeWindowSec: z.number().int().min(60).max(1800).default(90),
+  minObserveSec: z.number().int().min(15).max(900).default(25),
   /** Facets below this confidence are dropped from the conviction blend. Floored at 0.5. */
   convictionConfidenceFloor: z.number().min(0.5).max(0.95).default(0.5),
   /** If real-evidence coverage (excl. social/hype) is below this, conviction is capped to WATCH. */
