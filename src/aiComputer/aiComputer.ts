@@ -55,6 +55,26 @@ export type CouncilEvent =
   | { kind: "message"; taskId: string; mint: string; message: CouncilMessage }
   | { kind: "done"; taskId: string; mint: string; consensus?: Consensus; at: number };
 
+/**
+ * Pure rotation policy for the always-on debate: given live mints (oldest→newest,
+ * matching the intel LRU's insertion order) and when each was last debated, return
+ * the NEWEST coin that hasn't been debated within the cooldown — so fresh coins are
+ * preferred but every coin gets a turn before any repeats. Exported for tests.
+ */
+export function pickNextDebate(
+  mintsOldestFirst: string[],
+  lastDebatedAt: Map<string, number>,
+  now: number,
+  cooldownMs: number,
+): string | undefined {
+  for (let i = mintsOldestFirst.length - 1; i >= 0; i--) {
+    const mint = mintsOldestFirst[i]!;
+    const last = lastDebatedAt.get(mint);
+    if (last === undefined || now - last >= cooldownMs) return mint;
+  }
+  return undefined;
+}
+
 export class AiComputer {
   readonly audit: AuditLog;
   readonly approvals = new ApprovalQueue();
@@ -62,6 +82,9 @@ export class AiComputer {
   private readonly results = new Map<string, AiComputerResult>();
   private readonly opencode = new OpencodeServer();
   private counter = 0;
+  // Always-on auto-debate: rotate the council through live coins, one at a time.
+  private autoTimer?: NodeJS.Timeout;
+  private readonly lastDebatedAt = new Map<string, number>();
 
   constructor(
     db: DB,
@@ -76,10 +99,45 @@ export class AiComputer {
   }
 
   /** Enqueue a background research task; returns its id immediately. */
-  research(mint: string): string {
+  research(mint: string, opts: { skipBrowser?: boolean } = {}): string {
     const taskId = `ai_${mint.slice(0, 6)}_${Date.now().toString(36)}_${this.counter++}`;
-    this.queue.enqueue(() => this.run(taskId, mint));
+    this.queue.enqueue(() => this.run(taskId, mint, opts.skipBrowser ?? false));
     return taskId;
+  }
+
+  /**
+   * Always-on Council Room: continuously debate the live coins. While enabled,
+   * whenever the council queue is idle we pick the most-recently-observed coin
+   * that hasn't been debated within the cooldown and convene the panel on it —
+   * so the room is never idle and the user never has to trigger a debate. Browser
+   * screenshots are skipped on auto runs (they're an AI-Computer audit feature,
+   * not needed for the debate, and would hammer Playwright).
+   */
+  startAutoDebate(opts: { intervalMs?: number; cooldownMs?: number } = {}): void {
+    const intervalMs = opts.intervalMs ?? 6_000;
+    const cooldownMs = opts.cooldownMs ?? 12 * 60_000;
+    if (this.autoTimer) return;
+    this.autoTimer = setInterval(() => {
+      if (!this.settings.get("councilAutoDebate")) return;
+      if (!this.queue.idle) return; // a debate is still running — keep it one-at-a-time
+      if (this.activeRoster().length === 0) return; // no seats enabled → nothing to run
+      const mint = this.pickAutoCandidate(cooldownMs);
+      if (!mint) return;
+      this.lastDebatedAt.set(mint, Date.now());
+      this.research(mint, { skipBrowser: true });
+    }, intervalMs);
+    log.ok("council auto-debate started (always-on; rotates through live coins)");
+  }
+
+  stopAutoDebate(): void {
+    if (this.autoTimer) clearInterval(this.autoTimer);
+    this.autoTimer = undefined;
+  }
+
+  /** Newest observed coin not debated within the cooldown (rotates the stream). */
+  private pickAutoCandidate(cooldownMs: number): string | undefined {
+    // ctx.intel is an insertion-ordered LRU (oldest → newest).
+    return pickNextDebate([...this.ctx.intel.keys()], this.lastDebatedAt, Date.now(), cooldownMs);
   }
 
   getResult(taskId: string): AiComputerResult | undefined {
@@ -102,14 +160,17 @@ export class AiComputer {
     this.opencode.stop();
   }
 
-  private async run(taskId: string, mint: string): Promise<void> {
-    // 1. Read-only browser evidence (audited screenshots) — unchanged.
+  private async run(taskId: string, mint: string, skipBrowser = false): Promise<void> {
+    // 1. Read-only browser evidence (audited screenshots). Skipped on always-on
+    //    auto runs — it's an AI-Computer audit feature, not needed for the debate.
     const pages: AiComputerResult["evidence"] = [];
-    const urls = [
-      `https://rugcheck.xyz/tokens/${mint}`,
-      `https://dexscreener.com/solana/${mint}`,
-      `https://solscan.io/token/${mint}`,
-    ];
+    const urls = skipBrowser
+      ? []
+      : [
+          `https://rugcheck.xyz/tokens/${mint}`,
+          `https://dexscreener.com/solana/${mint}`,
+          `https://solscan.io/token/${mint}`,
+        ];
     for (const url of urls) {
       const decision = checkAction({ type: "navigate", url });
       const cap = decision.allowed ? await captureEvidence(url) : { available: true, error: decision.reason };

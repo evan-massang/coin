@@ -113,7 +113,7 @@ function renderCouncil() {
   const consensus = res && res.consensus;
   const cs = STATE.councilStats || {};
   const statsMap = {}; for (const s of cs.stats || []) statsMap[s.memberId] = s;
-  $("#open-room").style.display = (members.length || (STATE.councilLive && (STATE.councilLive.messages || []).length)) ? "inline-block" : "none";
+  $("#open-room").style.display = "inline-block"; // always-on debate — the room is always available
 
   if (res) { const sig = STATE.signals.find((x) => x.mint === res.mint); $("#council-token").textContent = sig ? "$" + (sig.symbol || res.mint.slice(0, 5)) : res.mint.slice(0, 6) + "…"; }
   else $("#council-token").textContent = "—";
@@ -121,8 +121,10 @@ function renderCouncil() {
   if (!members.length) {
     const roster = cs.roster || [];
     const active = roster.filter((m) => m.enabled && (m.provider === "anthropic" || cs.opencodeEnabled));
-    $("#council-members").innerHTML = `<div class="muted small">enable seats + run AI research in CONFIG → the council never overrides safety, risk, or the verdict</div>`
-      + (roster.length ? `<div class="muted small" style="margin-top:8px">seats: ${roster.map((m) => `${esc(m.label)} <span class="cm-role">${ROLE_LABEL[m.role] || m.role}</span>`).join(" · ")}<br>active now: ${active.length} ${cs.opencodeEnabled ? "" : "(opencode council off)"}</div>` : "");
+    $("#council-members").innerHTML = active.length
+      ? `<div class="muted small">⚖ the council debates the live coins automatically — always on. Enter the room to watch. Advisory only; never overrides safety, risk, or the verdict.</div>`
+      : `<div class="muted small">enable seats in CONFIG to start the always-on debate → the council never overrides safety, risk, or the verdict</div>`;
+    $("#council-members").innerHTML += roster.length ? `<div class="muted small" style="margin-top:8px">seats: ${roster.map((m) => `${esc(m.label)} <span class="cm-role">${ROLE_LABEL[m.role] || m.role}</span>`).join(" · ")}<br>active now: ${active.length} ${cs.opencodeEnabled ? "" : "(opencode council off)"}</div>` : "";
     $("#council-consensus").innerHTML = "";
     return;
   }
@@ -178,7 +180,7 @@ function bubble(m) {
 
 function renderRoomChat() {
   const d = roomData();
-  if (!d) { $("#room-body").innerHTML = `<div class="muted">No deliberation yet — pick a token and hit “run a live debate”.</div>`; return; }
+  if (!d) { $("#room-body").innerHTML = `<div class="muted">The council is warming up — debates run automatically on the live coins and appear here within a few seconds. (If this stays empty, enable seats in CONFIG.)</div>`; return; }
   $("#room-title").textContent = (d.live ? "live debate · $" : "council debate · $") + d.symbol;
   const r1 = d.messages.filter((m) => m.round === 1);
   const r2 = d.messages.filter((m) => m.round === 2);
@@ -196,15 +198,6 @@ function renderRoomChat() {
 }
 
 function openCouncilRoom() { renderRoomChat(); $("#room").classList.add("open"); }
-
-async function runDebate() {
-  const mint = STATE.selectedMint; if (!mint) { alert("Select a token in the table first."); return; }
-  const sig = STATE.signals.find((x) => x.mint === mint);
-  STATE.councilLive = { mint, symbol: (sig && sig.symbol) || mint.slice(0, 5), evidenceText: "", messages: [], consensus: null, status: "running" };
-  openCouncilRoom();
-  const r = await api("/ai-computer/task", { method: "POST", body: { mint } }).catch(() => ({ ok: false }));
-  if (!r.ok) { STATE.councilLive.status = "done"; renderRoomChat(); }
-}
 
 // ── observed-token table (State / Conviction / Evidence + clickable) ──
 function stateChip(st) { return st ? `<span class="statepill st-${st}">${st.replace("_", " ")}</span>` : `<span class="muted small">—</span>`; }
@@ -485,6 +478,7 @@ const CFG = [
   { k: "heliusApiKey", label: "helius key", t: "secret" },
   { k: "anthropicApiKey", label: "anthropic key (Claude seat)", t: "secret" },
   { k: "rugcheckApiKey", label: "rugcheck key", t: "secret" },
+  { k: "councilAutoDebate", label: "always-on council debate (auto, every coin)", t: "checkbox" },
   { k: "opencodeEnabled", label: "opencode council (GPT/DeepSeek/Qwen)", t: "checkbox" },
   { k: "opencodeAutoServe", label: "auto-start opencode server", t: "checkbox" },
   { k: "opencodeModel", label: "opencode default model", t: "text" },
@@ -515,7 +509,6 @@ $("#open-config").onclick = openConfig;
 $("#close-config").onclick = () => $("#config").classList.remove("open");
 $("#open-room").onclick = openCouncilRoom;
 $("#close-room").onclick = () => $("#room").classList.remove("open");
-$("#run-debate").onclick = runDebate;
 $("#pw-reset").onclick = async () => { if (!confirm("Reset the paper wallet to its starting balance? This clears all simulated positions.")) return; await api("/paper/reset", { method: "POST" }); renderPaper(); };
 $("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — the Council Room updates shortly` : `error: ${r.error}`; };
 

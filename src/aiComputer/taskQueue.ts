@@ -8,6 +8,12 @@ export class TaskQueue {
     return this.q.length;
   }
 
+  /** True when nothing is queued AND nothing is running — safe to enqueue the
+   *  next always-on debate without piling work up. */
+  get idle(): boolean {
+    return !this.running && this.q.length === 0;
+  }
+
   enqueue(fn: () => Promise<void>): void {
     this.q.push(fn);
     void this.drain();

@@ -112,6 +112,10 @@ export const SettingsSchema = z.object({
   councilMembers: z.array(CouncilMemberConfigSchema).default(DEFAULT_COUNCIL),
   /** Run a 2nd "debate" round where local seats react to each other (Council Room chat). */
   councilDebate: z.boolean().default(true),
+  /** Always-on Council Room: the panel auto-debates the live coins continuously
+   *  (rotating, one at a time) so there's no "run a debate" button — just watch.
+   *  Uses whatever seats are enabled; with local Ollama seats this is free. */
+  councilAutoDebate: z.boolean().default(true),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

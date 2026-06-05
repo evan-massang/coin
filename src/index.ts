@@ -77,6 +77,11 @@ async function main(): Promise<void> {
       },
     });
     walletExits.start();
+
+    // Always-on Council Room: the AI panel continuously debates the live coins
+    // (rotating, one at a time) — no manual trigger. Advisory only; never
+    // overrides safety, risk, or the verdict. No-op until seats are enabled.
+    svc.aiComputer.startAutoDebate();
   } else {
     log.warn("NO_ENGINE=1 — scanner disabled, dashboard only");
   }
@@ -98,6 +103,7 @@ async function main(): Promise<void> {
       paperExits?.stop();
       outcomes?.stop();
       learning?.stop();
+      svc.aiComputer.stopAutoDebate();
       svc.aiComputer.shutdownOpencode();
       await close();
     } finally {
