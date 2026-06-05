@@ -9,31 +9,45 @@ import { buildSystemPrompt, buildEvidencePrompt, parseVerdict, type CouncilEvide
 // would proxy to, minus the tools. Fully local, no keys, read-only (text only).
 // Never throws → undefined on any failure (server down, model missing, bad output).
 
+/** Raw chat completion against a local Ollama model. Never throws → undefined. */
+export async function ollamaChat(
+  baseUrl: string,
+  model: string,
+  system: string,
+  user: string,
+  timeoutMs = 90000,
+): Promise<string | undefined> {
+  const modelId = model.startsWith("ollama/") ? model.slice("ollama/".length) : model;
+  const res = (await runWithTimeout(
+    fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: modelId,
+        stream: false,
+        temperature: 0.3,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      }),
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<unknown>) : undefined))
+      .catch(() => undefined),
+    timeoutMs,
+    undefined,
+  )) as { choices?: Array<{ message?: { content?: string } }> } | undefined;
+  const content = res?.choices?.[0]?.message?.content;
+  return typeof content === "string" ? content : undefined;
+}
+
 export async function ollamaReview(
   evidence: CouncilEvidence,
   opts: { baseUrl: string; model: string; role: CouncilRole; timeoutMs?: number },
 ): Promise<CouncilVerdict | undefined> {
-  const model = opts.model.startsWith("ollama/") ? opts.model.slice("ollama/".length) : opts.model;
-  const body = {
-    model,
-    stream: false,
-    temperature: 0.3,
-    messages: [
-      { role: "system", content: buildSystemPrompt(opts.role) },
-      { role: "user", content: `Evidence:\n${buildEvidencePrompt(evidence)}\n\nReview as strict JSON from your seat.` },
-    ],
-  };
-  const res = (await runWithTimeout(
-    fetch(`${opts.baseUrl}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-      .then((r) => (r.ok ? (r.json() as Promise<unknown>) : undefined))
-      .catch(() => undefined),
+  const text = await ollamaChat(
+    opts.baseUrl,
+    opts.model,
+    buildSystemPrompt(opts.role),
+    `Evidence:\n${buildEvidencePrompt(evidence)}\n\nReview as strict JSON from your seat.`,
     opts.timeoutMs ?? 90000,
-    undefined,
-  )) as { choices?: Array<{ message?: { content?: string } }> } | undefined;
-  const content = res?.choices?.[0]?.message?.content;
-  return typeof content === "string" ? parseVerdict(content) : undefined;
+  );
+  return text ? parseVerdict(text) : undefined;
 }

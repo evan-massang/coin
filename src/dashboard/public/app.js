@@ -32,7 +32,7 @@ const isBuy = (v) => v === "BUY_SMALL" || v === "BUY_STRONG";
 
 const STATE = {
   signals: [], status: null, market: null, engine: null, council: null, councilStats: null,
-  selectedMint: null, selected: null, focusEntity: null, bootAt: Date.now(),
+  councilLive: null, selectedMint: null, selected: null, focusEntity: null, bootAt: Date.now(),
 };
 
 const ROLE_LABEL = { bull_analyst: "Bull Analyst", narrative_analyst: "Narrative Analyst", risk_analyst: "Risk Analyst", contrarian: "Contrarian", lead_reviewer: "Lead Reviewer" };
@@ -106,7 +106,7 @@ function renderCouncil() {
   const consensus = res && res.consensus;
   const cs = STATE.councilStats || {};
   const statsMap = {}; for (const s of cs.stats || []) statsMap[s.memberId] = s;
-  $("#open-room").style.display = members.length ? "inline-block" : "none";
+  $("#open-room").style.display = (members.length || (STATE.councilLive && (STATE.councilLive.messages || []).length)) ? "inline-block" : "none";
 
   if (res) { const sig = STATE.signals.find((x) => x.mint === res.mint); $("#council-token").textContent = sig ? "$" + (sig.symbol || res.mint.slice(0, 5)) : res.mint.slice(0, 6) + "…"; }
   else $("#council-token").textContent = "—";
@@ -142,48 +142,61 @@ function renderCouncil() {
   } else $("#council-consensus").innerHTML = "";
 }
 
-// ── Council Room: the deliberation transcript (what the panel was asked + said) ──
-function factChip(t, cls) { return `<span class="room-fact ${cls || ""}">${esc(t)}</span>`; }
-function openCouncilRoom() {
-  const res = STATE.council; if (!res || !(res.members || []).length) return;
-  const ev = res.councilEvidence || {};
-  const sig = STATE.signals.find((x) => x.mint === res.mint);
-  $("#room-title").textContent = "deliberation · " + (sig ? "$" + (sig.symbol || res.mint.slice(0, 5)) : res.mint.slice(0, 8));
+// ── Council Room: a live chat where the analysts debate ──
+const ROLE_INITIAL = { bull_analyst: "BL", narrative_analyst: "NA", risk_analyst: "RK", contrarian: "CT", lead_reviewer: "LD" };
+const roleColor = (role) => (role === "risk_analyst" || role === "contrarian" ? COL.gold : role === "lead_reviewer" ? COL.blue : COL.green);
 
-  const facts = [factChip(`state ${ev.state || "?"} · coverage ${ev.coverage ?? "?"}%`), factChip(`regime ${ev.marketRegime || "?"}`)];
-  (ev.bullPoints || []).forEach((p) => facts.push(factChip(p, "bull")));
-  (ev.bearPoints || []).forEach((p) => facts.push(factChip(p, "bear")));
-  if (ev.smartMoney) facts.push(factChip("smart money present", "bull"));
-  if (ev.clusterDetected) facts.push(factChip("buyer cluster", "bull"));
-  if (ev.devSold) facts.push(factChip("deployer sold", "bear"));
-  if (ev.rugMatch) facts.push(factChip("matches known rug", "bear"));
+function roomData() {
+  // A live debate in progress wins; else the latest completed result's transcript.
+  if (STATE.councilLive && STATE.councilLive.messages) return { ...STATE.councilLive, live: STATE.councilLive.status !== "done" };
+  const res = STATE.council;
+  const symOf = (mint) => { const s = STATE.signals.find((x) => x.mint === mint); return (s && s.symbol) || (mint || "").slice(0, 5); };
+  if (res && res.transcript && res.transcript.length) return { symbol: symOf(res.mint), evidenceText: res.evidenceText, messages: res.transcript, consensus: res.consensus, live: false };
+  if (res && (res.members || []).length) return { symbol: symOf(res.mint), evidenceText: res.evidenceText, messages: res.members.map((m) => ({ round: 1, ...m, text: m.rationale })), consensus: res.consensus, live: false };
+  return null;
+}
 
-  const question = `<div class="room-q">
-    <div class="sec-label">THE QUESTION — every analyst reviews this same evidence from a different seat</div>
-    <div class="room-facts">${facts.join("")}</div>
-    <div class="sec-label">EXACT EVIDENCE SENT TO EACH MODEL</div>
-    <div class="room-prompt">${esc(res.evidenceText || "(none)")}</div>
+function bubble(m) {
+  const bull = m.recommendation === "confirm";
+  const col = roleColor(m.role);
+  return `<div class="chat-msg${m.round === 2 ? " debate" : ""}">
+    <div class="chat-av" style="background:${col}">${ROLE_INITIAL[m.role] || "AI"}</div>
+    <div class="chat-body">
+      <div class="chat-meta"><b>${esc(m.label)}</b> <span class="muted">${ROLE_LABEL[m.role] || m.role}</span>${m.model ? ` <span class="muted small">· ${esc(m.model)}</span>` : ""}${m.round === 2 ? ` <span class="chat-tag">rebuttal</span>` : ""}</div>
+      <div class="chat-text">${esc(m.text || "")}</div>
+      ${m.recommendation ? `<span class="chat-call ${bull ? "green" : "gold"}">${bull ? "▲ confirm" : "△ caution"}${m.score != null ? " " + m.score : ""}</span>` : ""}
+    </div>
   </div>`;
+}
 
-  const seats = (res.members || []).map((m) => {
-    const bull = m.recommendation === "confirm";
-    return `<div class="seat">
-      <div class="seat-head"><span class="seat-name">${esc(m.label)}</span><span class="seat-role">${ROLE_LABEL[m.role] || m.role}</span>${m.model ? `<span class="seat-model">${esc(m.model)}</span>` : ""}${m.ms ? `<span class="seat-model">${(m.ms / 1000).toFixed(1)}s</span>` : ""}</div>
-      <div class="seat-ask">asked → ${esc(m.ask || "review the evidence from your seat")}</div>
-      <div class="seat-answer"><span class="a-rec ${bull ? "green" : "gold"}">${bull ? "▲ CONFIRM" : "△ CAUTION"} ${m.score}%</span> — ${esc(m.rationale || "")}</div>
-    </div>`;
-  }).join("");
+function renderRoomChat() {
+  const d = roomData();
+  if (!d) { $("#room-body").innerHTML = `<div class="muted">No deliberation yet — pick a token and hit “run a live debate”.</div>`; return; }
+  $("#room-title").textContent = (d.live ? "live debate · $" : "council debate · $") + d.symbol;
+  const r1 = d.messages.filter((m) => m.round === 1);
+  const r2 = d.messages.filter((m) => m.round === 2);
+  let html = d.evidenceText ? `<div class="room-q"><div class="sec-label">THE QUESTION — same evidence, every analyst a different seat</div><div class="room-prompt">${esc(d.evidenceText)}</div></div>` : "";
+  html += `<div class="chat-msg moderator"><div class="chat-av" style="background:var(--ink)">MOD</div><div class="chat-body"><div class="chat-meta"><b>Moderator</b></div><div class="chat-text">Analysts — opening takes on $${esc(d.symbol)}, please.</div></div></div>`;
+  html += r1.map(bubble).join("");
+  if (r2.length || d.live) html += `<div class="chat-divider">— DEBATE ROUND — react to the panel —</div>`;
+  html += r2.map(bubble).join("");
+  if (d.live) html += `<div class="chat-typing">▌ an analyst is thinking…</div>`;
+  if (d.consensus) {
+    const c = d.consensus, bull = c.recommendation === "confirm";
+    html += `<div class="chat-msg verdict"><div class="chat-av" style="background:${bull ? COL.green : COL.gold}">∑</div><div class="chat-body"><div class="chat-meta"><b>Consensus</b></div><div class="chat-text ${bull ? "green" : "gold"}">${bull ? "▲ BULLISH" : "△ CAUTION"} ${c.score}% · ${c.bullModels}/${c.members} bullish · agreement ${c.agreement}%</div><div class="muted small">advisory only — never overrides safety, risk, or the verdict</div></div></div>`;
+  }
+  const body = $("#room-body"); body.innerHTML = html; body.scrollTop = body.scrollHeight;
+}
 
-  const c = res.consensus;
-  const consensus = c ? `<div class="room-consensus">
-    <div class="sec-label">CONSENSUS — blended (weighted score + agreement), not a naive vote; ties break to caution</div>
-    <div class="consensus-score ${c.recommendation === "confirm" ? "green" : "gold"}">${c.recommendation === "confirm" ? "▲ BULLISH" : "△ CAUTION"} · ${c.score}%</div>
-    <div class="muted small">${c.bullModels}/${c.members} seats bullish · agreement ${c.agreement}%${c.sharedEvidence && c.sharedEvidence.length ? " · weighed: " + esc(c.sharedEvidence.join("; ")) : ""}</div>
-    <div class="muted small" style="margin-top:6px">advisory only — the engine's decision still comes from Observation + Confidence + Graph + Evidence + Risk, never the council.</div>
-  </div>` : "";
+function openCouncilRoom() { renderRoomChat(); $("#room").classList.add("open"); }
 
-  $("#room-body").innerHTML = question + `<div class="sec-label">THE PANEL — ${(res.members || []).length} seats deliberating</div>` + seats + consensus;
-  $("#room").classList.add("open");
+async function runDebate() {
+  const mint = STATE.selectedMint; if (!mint) { alert("Select a token in the table first."); return; }
+  const sig = STATE.signals.find((x) => x.mint === mint);
+  STATE.councilLive = { mint, symbol: (sig && sig.symbol) || mint.slice(0, 5), evidenceText: "", messages: [], consensus: null, status: "running" };
+  openCouncilRoom();
+  const r = await api("/ai-computer/task", { method: "POST", body: { mint } }).catch(() => ({ ok: false }));
+  if (!r.ok) { STATE.councilLive.status = "done"; renderRoomChat(); }
 }
 
 // ── observed-token table (State / Conviction / Evidence + clickable) ──
@@ -385,6 +398,16 @@ function connectWs() {
       if (isBuy(a.verdict) || a.verdict === "SELL_TRIM" || a.verdict === "SELL_EXIT_NOW") toast(a);
     } else if (m.type === "paper" && m.data && m.data.reset) {
       loadAll();
+    } else if (m.type === "council") {
+      const e = m.data;
+      if (!STATE.councilLive || STATE.councilLive.mint !== e.mint) {
+        const sig = STATE.signals.find((x) => x.mint === e.mint);
+        STATE.councilLive = { mint: e.mint, symbol: e.symbol || (sig && sig.symbol) || (e.mint || "").slice(0, 5), evidenceText: "", messages: [], consensus: null, status: "running" };
+      }
+      if (e.kind === "question") { STATE.councilLive.evidenceText = e.evidenceText || ""; if (e.symbol) STATE.councilLive.symbol = e.symbol; }
+      else if (e.kind === "message") { STATE.councilLive.messages.push(e.message); }
+      else if (e.kind === "done") { STATE.councilLive.consensus = e.consensus; STATE.councilLive.status = "done"; }
+      if ($("#room").classList.contains("open")) renderRoomChat();
     }
   };
 }
@@ -430,6 +453,7 @@ $("#open-config").onclick = openConfig;
 $("#close-config").onclick = () => $("#config").classList.remove("open");
 $("#open-room").onclick = openCouncilRoom;
 $("#close-room").onclick = () => $("#room").classList.remove("open");
+$("#run-debate").onclick = runDebate;
 $("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — the Council Room updates shortly` : `error: ${r.error}`; };
 
 (async function boot() {

@@ -88,6 +88,8 @@ export const SettingsSchema = z.object({
   ollamaBaseUrl: z.string().default("http://127.0.0.1:11434"),
   /** The council roster (seats, roles, providers, models, enabled). */
   councilMembers: z.array(CouncilMemberConfigSchema).default(DEFAULT_COUNCIL),
+  /** Run a 2nd "debate" round where local seats react to each other (Council Room chat). */
+  councilDebate: z.boolean().default(true),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

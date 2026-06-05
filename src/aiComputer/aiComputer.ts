@@ -11,9 +11,9 @@ import { saveScreenshot } from "./screenshotEvidence.js";
 import { checkAction } from "./actionPolicy.js";
 import { anthropicReview } from "./council.js";
 import { opencodeReview } from "./opencodeCouncil.js";
-import { ollamaReview } from "./ollamaCouncil.js";
+import { ollamaReview, ollamaChat } from "./ollamaCouncil.js";
 import { OpencodeServer } from "./opencodeServer.js";
-import { buildEvidencePrompt, type CouncilEvidence, type CouncilMemberResult, type CouncilVerdict } from "./councilShared.js";
+import { buildEvidencePrompt, buildDebateSystemPrompt, buildDebatePrompt, parseDebate, type CouncilEvidence, type CouncilMemberResult, type CouncilMessage, type CouncilVerdict } from "./councilShared.js";
 import { evidenceFromIntel, sparseEvidence } from "../council/evidence.js";
 import { buildConsensus, type Consensus } from "../council/consensus.js";
 import { ROLE_PROMPT, type CouncilMemberConfig } from "../council/roles.js";
@@ -44,8 +44,16 @@ export interface AiComputerResult {
   councilEvidence?: CouncilEvidence;
   /** The exact evidence text every seat received. */
   evidenceText?: string;
+  /** The full chat transcript (opening takes + debate) for the Council Room. */
+  transcript?: CouncilMessage[];
   evidence: Array<{ url: string; ok: boolean; reason: string; screenshotPath?: string }>;
 }
+
+/** Live Council Room event streamed to the dashboard over the websocket. */
+export type CouncilEvent =
+  | { kind: "question"; taskId: string; mint: string; symbol?: string; evidenceText: string; at: number }
+  | { kind: "message"; taskId: string; mint: string; message: CouncilMessage }
+  | { kind: "done"; taskId: string; mint: string; consensus?: Consensus; at: number };
 
 export class AiComputer {
   readonly audit: AuditLog;
@@ -61,6 +69,8 @@ export class AiComputer {
     private readonly tokens: TokensRepo,
     private readonly ctx: CouncilContext,
     private readonly councilJournal: CouncilRepo,
+    /** Live Council Room stream (websocket). Optional. */
+    private readonly broadcast?: (event: CouncilEvent) => void,
   ) {
     this.audit = new AuditLog(db);
   }
@@ -124,12 +134,37 @@ export class AiComputer {
         })
       : undefined;
 
-    // Sequential, not parallel: local CPU models serialize through Ollama anyway,
-    // and going one-at-a-time means a slow seat can't make queued seats time out.
+    // Open the room: post the question (live).
+    this.broadcast?.({ kind: "question", taskId, mint, symbol: evidence.symbol, evidenceText: buildEvidencePrompt(evidence), at: Date.now() });
+
+    const transcript: CouncilMessage[] = [];
     const members: CouncilMemberResult[] = [];
+    const post = (msg: CouncilMessage) => { transcript.push(msg); this.broadcast?.({ kind: "message", taskId, mint, message: msg }); };
+
+    // Round 1 — opening takes. Sequential: local CPU models serialize through
+    // Ollama anyway, and one-at-a-time means a slow seat can't time out the queue.
     for (const m of roster) {
       const r = await this.runMember(m, evidence, baseUrl).catch(() => undefined);
-      if (r) members.push(r);
+      if (!r) continue;
+      members.push(r);
+      post({ round: 1, id: r.id, label: r.label, role: r.role, model: r.model, text: r.rationale, recommendation: r.recommendation, score: r.score, at: Date.now() });
+    }
+
+    // Round 2 — debate. Local seats react to the panel and may move their call.
+    if (this.settings.get("councilDebate") && members.length >= 2) {
+      const ollamaBase = this.settings.get("ollamaBaseUrl");
+      for (const m of roster) {
+        if (!(m.provider === "opencode" && m.model.startsWith("ollama/"))) continue;
+        const mem = members.find((x) => x.id === m.id);
+        if (!mem) continue;
+        const others = members.filter((x) => x.id !== m.id);
+        const raw = await ollamaChat(ollamaBase, m.model, buildDebateSystemPrompt(m.role), buildDebatePrompt(evidence, others), 90000).catch(() => undefined);
+        if (!raw) continue;
+        const d = parseDebate(raw);
+        mem.recommendation = d.recommendation; // debate is the seat's FINAL stance
+        mem.score = d.score;
+        post({ round: 2, id: m.id, label: mem.label, role: m.role, model: m.model, text: d.text, recommendation: d.recommendation, score: d.score, at: Date.now() });
+      }
     }
 
     const consensus = buildConsensus(members, evidence, this.councilJournal.weights());
@@ -137,7 +172,7 @@ export class AiComputer {
       ? { score: consensus.score, recommendation: consensus.recommendation, rationale: consensus.rationale }
       : undefined;
 
-    // 3. Journal every seat's opinion for accuracy tracking (resolved later).
+    // Journal each seat's FINAL opinion for accuracy tracking (resolved later).
     const now = Date.now();
     for (const m of members) {
       this.councilJournal.record({
@@ -147,10 +182,11 @@ export class AiComputer {
     }
 
     this.results.set(taskId, {
-      taskId, mint, at: now, council, members, consensus,
+      taskId, mint, at: now, council, members, consensus, transcript,
       councilEvidence: evidence, evidenceText: buildEvidencePrompt(evidence), evidence: pages,
     });
-    log.info(`ai-computer: council done for ${mint.slice(0, 8)} — ${members.length} seat(s), consensus ${consensus ? consensus.recommendation + " " + consensus.score : "none"}`);
+    this.broadcast?.({ kind: "done", taskId, mint, consensus, at: now });
+    log.info(`ai-computer: council done for ${mint.slice(0, 8)} — ${members.length} seat(s), ${transcript.length} msg(s), consensus ${consensus ? consensus.recommendation + " " + consensus.score : "none"}`);
   }
 
   /** Seats that should run now: enabled + their provider is available. */

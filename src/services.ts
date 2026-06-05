@@ -91,7 +91,7 @@ export function createServices(db: DB = getDb()): Services {
     intel: new Map(),
     engineState: { observing: 0, decisionReady: 0, highConviction: 0, highRisk: 0 },
   };
-  const aiComputer = new AiComputer(db, settings, tokens, runtime, council);
+  const aiComputer = new AiComputer(db, settings, tokens, runtime, council, (event) => hub.broadcast("council", event));
 
   const dispatcher = new AlertDispatcher({
     settings,

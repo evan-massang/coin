@@ -27,6 +27,54 @@ export interface CouncilMemberResult extends CouncilVerdict {
   ms: number;
 }
 
+/** One line in the Council Room chat — an analyst "speaking". */
+export interface CouncilMessage {
+  /** 1 = opening take, 2 = debate / rebuttal. */
+  round: number;
+  id: string;
+  label: string;
+  role: CouncilRole;
+  model?: string;
+  text: string;
+  recommendation?: "confirm" | "caution";
+  score?: number;
+  at: number;
+}
+
+const DEBATE_SYSTEM = `You are one analyst on a PANEL reviewing a Solana meme-coin for a READ-ONLY signal engine.
+You see ONLY pre-digested evidence — never raw chain data, never live price. You are advisory only: you cannot trade, move funds, change a score, or override the Safety Gate.
+Speak in 1-2 short sentences, like one message in a group chat — be specific and react to the other analysts. Do NOT output JSON. End with EXACTLY one final line:
+CALL: confirm|caution SCORE: <0-100>`;
+
+/** System prompt for the debate round — conversational, ends with CALL/SCORE. */
+export function buildDebateSystemPrompt(role: CouncilRole): string {
+  return `${DEBATE_SYSTEM}\n\n${ROLE_PROMPT[role]}`;
+}
+
+/** Round-2 debate prompt: react to the panel's opening takes from your seat. */
+export function buildDebatePrompt(evidence: CouncilEvidence, others: CouncilMemberResult[]): string {
+  const panel = others.map((o) => `- ${o.label} (${o.role}): ${o.recommendation.toUpperCase()} ${o.score} — ${o.rationale}`).join("\n");
+  return `The panel gave opening takes on $${evidence.symbol ?? "?"}:\n${panel}\n\nFrom YOUR seat, respond to the panel in 1-2 sentences — hold your view, adjust, or push back, and say why. Then end with the CALL line.`;
+}
+
+/** Pull the spoken text + the final CALL/SCORE from a debate reply (robust to JSON). */
+export function parseDebate(text: string): { text: string; recommendation: "confirm" | "caution"; score: number } {
+  const callMatch = /CALL:\s*(confirm|caution)/i.exec(text);
+  const scoreMatch = /SCORE:\s*(\d{1,3})/i.exec(text);
+  if (callMatch || scoreMatch) {
+    const spoken = text.replace(/CALL:[\s\S]*$/i, "").trim() || text.trim();
+    return {
+      text: spoken.slice(0, 400),
+      recommendation: callMatch && /confirm/i.test(callMatch[1]!) ? "confirm" : "caution",
+      score: scoreMatch ? Math.max(0, Math.min(100, parseInt(scoreMatch[1]!, 10))) : 50,
+    };
+  }
+  // Model replied with JSON / prose instead — reuse the verdict parser, keep prose as the chat text.
+  const v = parseVerdict(text);
+  const spoken = text.replace(/```\w*|```/g, "").replace(/\{[\s\S]*\}\s*$/, "").trim();
+  return { text: (spoken || (v ? v.rationale : text)).slice(0, 400), recommendation: v ? v.recommendation : "caution", score: v ? v.score : 50 };
+}
+
 /**
  * Evidence-only input. Deliberately NO raw holders/liquidity numbers — the
  * council reasons over the engine's *interpreted* signals (Graph Intelligence,

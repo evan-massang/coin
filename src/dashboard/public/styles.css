@@ -188,6 +188,25 @@ a { color: var(--green-2); text-decoration: none; cursor: pointer; }
 .seat-answer { font-size: 15px; margin-top: 6px; }
 .seat-answer .a-rec { font-family: var(--pixel); font-size: 8px; }
 .room-consensus { border: 2px solid var(--ink); border-radius: 5px; padding: 11px; background: var(--panel-2); margin-top: 4px; }
+
+/* council chat room */
+.room-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.cfg.gold { color: var(--gold); border-color: var(--gold); }
+.cfg.gold:hover { background: var(--gold); color: #fff; }
+#room-body { max-height: 70vh; overflow-y: auto; }
+.chat-msg { display: flex; gap: 9px; padding: 8px 0; align-items: flex-start; }
+.chat-msg.debate { background: #efe9d6; border-radius: 6px; padding: 8px; margin-left: 18px; }
+.chat-msg.moderator { opacity: .85; }
+.chat-msg.verdict { border-top: 1px solid var(--line-2); margin-top: 6px; padding-top: 12px; }
+.chat-av { width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-family: var(--pixel); font-size: 8px; color: #fff; }
+.chat-body { flex: 1; }
+.chat-meta { font-size: 15px; }
+.chat-meta b { font-family: var(--pixel); font-size: 8px; }
+.chat-text { font-size: 16px; margin: 3px 0; line-height: 1.25; }
+.chat-call { font-family: var(--pixel); font-size: 7px; padding: 3px 5px; border: 1px solid currentColor; border-radius: 3px; }
+.chat-tag { font-family: var(--pixel); font-size: 6px; color: var(--gold); border: 1px solid var(--gold); border-radius: 3px; padding: 2px 4px; }
+.chat-divider { text-align: center; font-family: var(--pixel); font-size: 7px; color: var(--muted); margin: 12px 0; border-top: 1px dashed var(--line-2); padding-top: 10px; }
+.chat-typing { font-size: 15px; color: var(--muted); padding: 6px 0 6px 44px; animation: blink 1.2s infinite; }
 .cfgform { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 8px 0 18px; }
 .cfgform label { display: flex; flex-direction: column; gap: 4px; font-size: 15px; color: var(--muted); text-transform: uppercase; }
 .cfgform label.full { grid-column: 1 / -1; }

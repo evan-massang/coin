@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseVerdict, buildEvidencePrompt, buildSystemPrompt } from "./councilShared.js";
+import { parseVerdict, buildEvidencePrompt, buildSystemPrompt, parseDebate } from "./councilShared.js";
 
 describe("parseVerdict", () => {
   it("extracts JSON even with surrounding chatter", () => {
@@ -29,6 +29,23 @@ describe("buildEvidencePrompt", () => {
     expect(p).toContain("market_regime: ACCUMULATION");
     // no raw blockchain primitives leak through
     expect(p).not.toMatch(/holders:|liquidity_usd|topHolder|"liquidity"/i);
+  });
+});
+
+describe("parseDebate", () => {
+  it("reads the CALL/SCORE line + keeps the spoken text", () => {
+    const d = parseDebate("I concur with Llama — momentum is real.\nCALL: confirm SCORE: 82");
+    expect(d.recommendation).toBe("confirm");
+    expect(d.score).toBe(82);
+    expect(d.text).toContain("I concur with Llama");
+    expect(d.text).not.toMatch(/CALL:/);
+  });
+  it("falls back to JSON when a model ignores the CALL format", () => {
+    const d = parseDebate('Thin liquidity worries me. {"score":40,"recommendation":"caution","rationale":"risk"}');
+    expect(d.recommendation).toBe("caution");
+    expect(d.score).toBe(40);
+    expect(d.text).toContain("Thin liquidity");
+    expect(d.text).not.toMatch(/\{/);
   });
 });
 
