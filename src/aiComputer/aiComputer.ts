@@ -12,10 +12,10 @@ import { checkAction } from "./actionPolicy.js";
 import { anthropicReview } from "./council.js";
 import { opencodeReview } from "./opencodeCouncil.js";
 import { OpencodeServer } from "./opencodeServer.js";
-import type { CouncilEvidence, CouncilMemberResult, CouncilVerdict } from "./councilShared.js";
+import { buildEvidencePrompt, type CouncilEvidence, type CouncilMemberResult, type CouncilVerdict } from "./councilShared.js";
 import { evidenceFromIntel, sparseEvidence } from "../council/evidence.js";
 import { buildConsensus, type Consensus } from "../council/consensus.js";
-import type { CouncilMemberConfig } from "../council/roles.js";
+import { ROLE_PROMPT, type CouncilMemberConfig } from "../council/roles.js";
 import { log } from "../util/logger.js";
 
 // Orchestrates a READ-ONLY research task: open the allowlisted data pages for a
@@ -39,6 +39,10 @@ export interface AiComputerResult {
   council?: CouncilVerdict;
   members?: CouncilMemberResult[];
   consensus?: Consensus;
+  /** The interpreted facts put to the council (the "question") — for the room. */
+  councilEvidence?: CouncilEvidence;
+  /** The exact evidence text every seat received. */
+  evidenceText?: string;
   evidence: Array<{ url: string; ok: boolean; reason: string; screenshotPath?: string }>;
 }
 
@@ -137,7 +141,10 @@ export class AiComputer {
       });
     }
 
-    this.results.set(taskId, { taskId, mint, at: now, council, members, consensus, evidence: pages });
+    this.results.set(taskId, {
+      taskId, mint, at: now, council, members, consensus,
+      councilEvidence: evidence, evidenceText: buildEvidencePrompt(evidence), evidence: pages,
+    });
     log.info(`ai-computer: council done for ${mint.slice(0, 8)} — ${members.length} seat(s), consensus ${consensus ? consensus.recommendation + " " + consensus.score : "none"}`);
   }
 
@@ -164,7 +171,7 @@ export class AiComputer {
       v = await opencodeReview(evidence, { baseUrl, model: m.model || this.settings.get("opencodeModel"), role: m.role });
     }
     if (!v) return undefined;
-    return { ...v, id: m.id, label: m.label, role: m.role, model: m.model || undefined, ms: Date.now() - t0 };
+    return { ...v, id: m.id, label: m.label, role: m.role, model: m.model || undefined, ask: ROLE_PROMPT[m.role], ms: Date.now() - t0 };
   }
 }
 

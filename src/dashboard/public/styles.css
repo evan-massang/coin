@@ -169,6 +169,25 @@ a { color: var(--green-2); text-decoration: none; cursor: pointer; }
 .overlay { display: none; position: fixed; inset: 0; background: rgba(30,30,25,0.55); z-index: 1000; align-items: flex-start; justify-content: center; overflow: auto; padding: 30px 12px; }
 .overlay.open { display: flex; }
 .overlay-box { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px; width: 100%; max-width: 640px; padding: 14px; }
+.overlay-box.wide { max-width: 820px; }
+
+/* council room (deliberation transcript) */
+.room-q { border: 1px solid var(--line-2); border-radius: 5px; background: var(--panel); padding: 10px; margin-bottom: 12px; }
+.room-q .sec-label { margin-top: 0; }
+.room-facts { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+.room-fact { font-size: 13px; border: 1px solid var(--line-2); border-radius: 3px; padding: 3px 6px; background: var(--paper); }
+.room-fact.bull { color: var(--green-2); border-color: var(--green); }
+.room-fact.bear { color: var(--red); border-color: var(--red); }
+.room-prompt { font-family: var(--mono); font-size: 14px; white-space: pre-wrap; color: var(--muted); background: var(--paper); border: 1px dotted var(--line-2); border-radius: 4px; padding: 8px; max-height: 150px; overflow: auto; }
+.seat { border: 1px solid var(--line-2); border-radius: 5px; padding: 10px; margin-bottom: 10px; background: var(--panel); }
+.seat-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.seat-name { font-family: var(--pixel); font-size: 9px; }
+.seat-role { font-size: 14px; color: var(--muted); flex: 1; }
+.seat-model { font-size: 12px; color: var(--muted); }
+.seat-ask { font-size: 14px; color: var(--ink); margin: 7px 0; padding-left: 9px; border-left: 2px solid var(--line-2); }
+.seat-answer { font-size: 15px; margin-top: 6px; }
+.seat-answer .a-rec { font-family: var(--pixel); font-size: 8px; }
+.room-consensus { border: 2px solid var(--ink); border-radius: 5px; padding: 11px; background: var(--panel-2); margin-top: 4px; }
 .cfgform { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 8px 0 18px; }
 .cfgform label { display: flex; flex-direction: column; gap: 4px; font-size: 15px; color: var(--muted); text-transform: uppercase; }
 .cfgform label.full { grid-column: 1 / -1; }

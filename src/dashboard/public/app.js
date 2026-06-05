@@ -106,6 +106,7 @@ function renderCouncil() {
   const consensus = res && res.consensus;
   const cs = STATE.councilStats || {};
   const statsMap = {}; for (const s of cs.stats || []) statsMap[s.memberId] = s;
+  $("#open-room").style.display = members.length ? "inline-block" : "none";
 
   if (res) { const sig = STATE.signals.find((x) => x.mint === res.mint); $("#council-token").textContent = sig ? "$" + (sig.symbol || res.mint.slice(0, 5)) : res.mint.slice(0, 6) + "…"; }
   else $("#council-token").textContent = "—";
@@ -139,6 +140,50 @@ function renderCouncil() {
       <div class="muted small" style="margin-top:6px">advisory only — never overrides safety, risk, or the verdict</div>
     </div>`;
   } else $("#council-consensus").innerHTML = "";
+}
+
+// ── Council Room: the deliberation transcript (what the panel was asked + said) ──
+function factChip(t, cls) { return `<span class="room-fact ${cls || ""}">${esc(t)}</span>`; }
+function openCouncilRoom() {
+  const res = STATE.council; if (!res || !(res.members || []).length) return;
+  const ev = res.councilEvidence || {};
+  const sig = STATE.signals.find((x) => x.mint === res.mint);
+  $("#room-title").textContent = "deliberation · " + (sig ? "$" + (sig.symbol || res.mint.slice(0, 5)) : res.mint.slice(0, 8));
+
+  const facts = [factChip(`state ${ev.state || "?"} · coverage ${ev.coverage ?? "?"}%`), factChip(`regime ${ev.marketRegime || "?"}`)];
+  (ev.bullPoints || []).forEach((p) => facts.push(factChip(p, "bull")));
+  (ev.bearPoints || []).forEach((p) => facts.push(factChip(p, "bear")));
+  if (ev.smartMoney) facts.push(factChip("smart money present", "bull"));
+  if (ev.clusterDetected) facts.push(factChip("buyer cluster", "bull"));
+  if (ev.devSold) facts.push(factChip("deployer sold", "bear"));
+  if (ev.rugMatch) facts.push(factChip("matches known rug", "bear"));
+
+  const question = `<div class="room-q">
+    <div class="sec-label">THE QUESTION — every analyst reviews this same evidence from a different seat</div>
+    <div class="room-facts">${facts.join("")}</div>
+    <div class="sec-label">EXACT EVIDENCE SENT TO EACH MODEL</div>
+    <div class="room-prompt">${esc(res.evidenceText || "(none)")}</div>
+  </div>`;
+
+  const seats = (res.members || []).map((m) => {
+    const bull = m.recommendation === "confirm";
+    return `<div class="seat">
+      <div class="seat-head"><span class="seat-name">${esc(m.label)}</span><span class="seat-role">${ROLE_LABEL[m.role] || m.role}</span>${m.model ? `<span class="seat-model">${esc(m.model)}</span>` : ""}${m.ms ? `<span class="seat-model">${(m.ms / 1000).toFixed(1)}s</span>` : ""}</div>
+      <div class="seat-ask">asked → ${esc(m.ask || "review the evidence from your seat")}</div>
+      <div class="seat-answer"><span class="a-rec ${bull ? "green" : "gold"}">${bull ? "▲ CONFIRM" : "△ CAUTION"} ${m.score}%</span> — ${esc(m.rationale || "")}</div>
+    </div>`;
+  }).join("");
+
+  const c = res.consensus;
+  const consensus = c ? `<div class="room-consensus">
+    <div class="sec-label">CONSENSUS — blended (weighted score + agreement), not a naive vote; ties break to caution</div>
+    <div class="consensus-score ${c.recommendation === "confirm" ? "green" : "gold"}">${c.recommendation === "confirm" ? "▲ BULLISH" : "△ CAUTION"} · ${c.score}%</div>
+    <div class="muted small">${c.bullModels}/${c.members} seats bullish · agreement ${c.agreement}%${c.sharedEvidence && c.sharedEvidence.length ? " · weighed: " + esc(c.sharedEvidence.join("; ")) : ""}</div>
+    <div class="muted small" style="margin-top:6px">advisory only — the engine's decision still comes from Observation + Confidence + Graph + Evidence + Risk, never the council.</div>
+  </div>` : "";
+
+  $("#room-body").innerHTML = question + `<div class="sec-label">THE PANEL — ${(res.members || []).length} seats deliberating</div>` + seats + consensus;
+  $("#room").classList.add("open");
 }
 
 // ── observed-token table (State / Conviction / Evidence + clickable) ──
@@ -383,6 +428,8 @@ async function saveConfig() {
 }
 $("#open-config").onclick = openConfig;
 $("#close-config").onclick = () => $("#config").classList.remove("open");
+$("#open-room").onclick = openCouncilRoom;
+$("#close-room").onclick = () => $("#room").classList.remove("open");
 $("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — the Council Room updates shortly` : `error: ${r.error}`; };
 
 (async function boot() {

@@ -91,6 +91,7 @@
             <div class="panel-head"><span class="tag dark">⚖ COUNCIL ROOM</span><h2 class="small">specialist panel · advisory only</h2><span class="muted small" id="council-token">—</span></div>
             <div id="council-members"><div class="muted small">enable seats + run AI research in CONFIG → the council never overrides safety, risk, or the verdict</div></div>
             <div id="council-consensus"></div>
+            <a class="cfg" id="open-room" style="display:none;margin-top:10px">▸ ENTER THE ROOM — see the deliberation</a>
           </div>
         </div>
       </section>
@@ -118,6 +119,13 @@
       </section>
 
       <div class="ticker-bottom"><div class="marquee" id="alerts">loading…</div></div>
+    </div>
+
+    <div class="overlay" id="room">
+      <div class="overlay-box wide">
+        <div class="panel-head"><span class="tag dark">⚖ COUNCIL ROOM</span><h2 id="room-title">deliberation</h2><a class="cfg" id="close-room">✕ CLOSE</a></div>
+        <div id="room-body"></div>
+      </div>
     </div>
 
     <div class="overlay" id="config">

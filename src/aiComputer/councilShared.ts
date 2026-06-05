@@ -21,6 +21,8 @@ export interface CouncilMemberResult extends CouncilVerdict {
   label: string;
   role: CouncilRole;
   model?: string;
+  /** What this seat was asked to do (its role instruction) — shown in the room. */
+  ask?: string;
   /** Round-trip latency for this seat, ms. */
   ms: number;
 }
