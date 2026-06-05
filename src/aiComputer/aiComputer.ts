@@ -158,7 +158,7 @@ export class AiComputer {
         const mem = members.find((x) => x.id === m.id);
         if (!mem) continue;
         const others = members.filter((x) => x.id !== m.id);
-        const raw = await ollamaChat(ollamaBase, m.model, buildDebateSystemPrompt(m.role), buildDebatePrompt(evidence, others), 90000).catch(() => undefined);
+        const raw = await ollamaChat(ollamaBase, m.model, buildDebateSystemPrompt(m.role), buildDebatePrompt(evidence, others), 150000).catch(() => undefined);
         if (!raw) continue;
         const d = parseDebate(raw);
         mem.recommendation = d.recommendation; // debate is the seat's FINAL stance

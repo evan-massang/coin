@@ -15,7 +15,7 @@ export async function ollamaChat(
   model: string,
   system: string,
   user: string,
-  timeoutMs = 90000,
+  timeoutMs = 150000,
 ): Promise<string | undefined> {
   const modelId = model.startsWith("ollama/") ? model.slice("ollama/".length) : model;
   const res = (await runWithTimeout(
@@ -47,7 +47,7 @@ export async function ollamaReview(
     opts.model,
     buildSystemPrompt(opts.role),
     `Evidence:\n${buildEvidencePrompt(evidence)}\n\nReview as strict JSON from your seat.`,
-    opts.timeoutMs ?? 90000,
+    opts.timeoutMs ?? 150000,
   );
   return text ? parseVerdict(text) : undefined;
 }
