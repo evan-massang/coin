@@ -28,6 +28,37 @@ export function paperRoutes(svc: Services): Router {
     });
   });
 
+  // Profit x Time series: per owned paper position, the PnL% trajectory from the
+  // moment it was bought (point 0 = entry = 0%). Open + recently-closed (<=3h).
+  r.get("/paper/series", (_req, res) => {
+    const now = Date.now();
+    const open = svc.paperPositions.byStatus(true);
+    const closed = svc.paperPositions.byStatus(false).filter((p) => (p.closedAtMs ?? 0) > now - 3 * 60 * 60_000);
+    // Most-recent ~40 by buy time — open positions always kept; keeps the chart
+    // legible and the payload small (pan/zoom explores the rest of the window).
+    const positions = [...open, ...closed].sort((a, b) => b.entryAtMs - a.entryAtMs).slice(0, 40);
+    const samples = svc.paper.samplesForPositions(positions.map((p) => p.id));
+    res.json({
+      now,
+      positions: positions.map((p) => {
+        const pts = samples.get(p.id) ?? [];
+        // Always anchor the line at 0% on the buy timestamp.
+        const points = [{ t: p.entryAtMs, pnl: 0 }, ...pts];
+        const curPnl = p.entryPriceUsd > 0 && p.lastPriceUsd ? (p.lastPriceUsd / p.entryPriceUsd - 1) * 100 : 0;
+        return {
+          id: p.id,
+          mint: p.mint,
+          symbol: p.symbol ?? p.mint.slice(0, 5),
+          entryAtMs: p.entryAtMs,
+          status: p.status,
+          closedAtMs: p.closedAtMs ?? null,
+          curPnl,
+          points,
+        };
+      }),
+    });
+  });
+
   // Reset the sim wallet to the configured starting balance.
   r.post("/paper/reset", (_req, res) => {
     const starting = svc.settings.get("paperStartingBalanceSol");

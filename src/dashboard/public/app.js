@@ -16,23 +16,12 @@ const commas = (n) => Number(n || 0).toLocaleString();
 
 const COL = { paper: "#f6f2e6", ink: "#21241d", green: "#2f8f4e", greenB: "#3aa85c", red: "#cf4b41", gold: "#c98a2b", blue: "#3f6fb0", muted: "#9a9886", line: "#d4ccb4" };
 const VC = { BUY_STRONG: COL.greenB, BUY_SMALL: COL.green, WATCH_ONLY: COL.muted, TOO_LATE: COL.gold, AVOID: COL.red, SELL_TRIM: COL.gold, SELL_EXIT_NOW: COL.red };
-const ET = { TOKEN: COL.ink, DEV: COL.blue, BUYERS: COL.green, CLUSTER: COL.gold, SMART_MONEY: COL.blue, NARRATIVE: COL.gold, KNOWN_RUG: COL.red, UNVERIFIED: COL.muted };
-const ENT_DESC = {
-  TOKEN: "the token itself — the thing under investigation",
-  DEV: "deployer wallet — did the creator dump on holders?",
-  BUYERS: "organic buyers — real demand vs wash trading",
-  CLUSTER: "buyer cluster — checked for coordinated / bundled entry",
-  SMART_MONEY: "tracked smart-money wallets entered this token",
-  NARRATIVE: "narrative / social trend strength",
-  KNOWN_RUG: "matches a known rug fingerprint or bundle pattern",
-  UNVERIFIED: "data the engine could not verify (unknowns)",
-};
 const vcol = (v) => VC[v] || COL.muted;
 const isBuy = (v) => v === "BUY_SMALL" || v === "BUY_STRONG";
 
 const STATE = {
   signals: [], status: null, market: null, engine: null, council: null, councilStats: null,
-  councilLive: null, selectedMint: null, selected: null, focusEntity: null, bootAt: Date.now(),
+  councilLive: null, selectedMint: null, selected: null, focusEntity: null, series: null, bootAt: Date.now(),
 };
 
 const ROLE_LABEL = { bull_analyst: "Bull Analyst", narrative_analyst: "Narrative Analyst", risk_analyst: "Risk Analyst", contrarian: "Contrarian", lead_reviewer: "Lead Reviewer" };
@@ -70,6 +59,7 @@ async function loadAll() {
   STATE.status = status; STATE.market = market; STATE.engine = engine; STATE.council = council; STATE.councilStats = councilStats;
   STATE.signals = (signals || []).map((s) => ({ ...s, verdict: s.verdict })).reverse();
   renderEngineState(); renderRegime(); renderCouncil(); renderTable(); renderAlerts(); renderPaper(); renderReasoning();
+  api("/paper/series").then((s) => { if (s && s.positions) STATE.series = s; }).catch(() => {});
   // Default selection = highest-conviction recent token.
   if (!STATE.selectedMint && STATE.signals.length) selectToken((topSignal() || STATE.signals[STATE.signals.length - 1]).mint);
   else if (STATE.selectedMint) refreshSelected();
@@ -311,63 +301,117 @@ function renderSelected() {
   $("#tl-list").innerHTML = tl.length
     ? tl.map((t) => `<li class="${/⚠/.test(t.label) ? "warn" : ""}"><span class="tl-t">+${ageMs(t.atMs)}</span><br>${esc(t.label)}</li>`).join("")
     : `<li class="muted small">${i ? "no timeline captured" : "select a token"}</li>`;
-
-  // graph label
-  $("#graph-token").textContent = i ? tok.replace(/<[^>]+>/g, "") : "select a token";
 }
 
-// ── investigation graph (selected token's entities; clickable nodes) ──
-let graphCv; const graphNodes = []; let wob = 0;
-function drawGraph() {
-  if (!graphCv) { graphCv = $("#graph"); graphCv.onclick = onGraphClick; }
-  const { ctx, w, h } = fit(graphCv, 320);
-  const i = STATE.selected;
-  const ents = (i && i.entities) || [];
-  const cx = w / 2, cy = h / 2; wob += 0.01;
-  graphNodes.length = 0;
+// ── PROFIT × TIME chart — the coins we bought; each line starts at 0% at buy ──
+// View window over absolute time; drag to pan, zoom buttons/wheel, ⊙ snaps to now.
+const CHART = { viewMs: 30 * 60_000, endAt: Date.now(), live: true, drag: false, lastX: 0 };
+const imgCache = {};
+function coinImg(mint) {
+  if (imgCache[mint]) return imgCache[mint];
+  const im = new Image(); // no crossOrigin: lets it draw even without CORS (we never read pixels)
+  im.src = `https://dd.dexscreener.com/ds-data/tokens/solana/${mint}.png`;
+  im.onerror = () => { im._failed = true; };
+  imgCache[mint] = im;
+  return im;
+}
+function hms(ms) { const d = new Date(ms); return d.toISOString().slice(11, 16); }
 
-  $("#graph-stats").textContent = i ? `nodes ${ents.length} · ${esc(i.symbol || "?")}` : "nodes 0";
-  $("#legend").innerHTML = [["TOKEN", ET.TOKEN], ["DEV", ET.DEV], ["BUYERS", ET.BUYERS], ["CLUSTER", ET.CLUSTER], ["SMART MONEY", ET.SMART_MONEY], ["NARRATIVE", ET.NARRATIVE], ["RUG / SNIPER", ET.KNOWN_RUG]]
-    .map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join("");
+let pchartCv;
+function drawProfitChart() {
+  if (!pchartCv) { pchartCv = $("#pchart"); setupChartInput(pchartCv); }
+  const { ctx, w, h } = fit(pchartCv, 330);
+  if (CHART.live) CHART.endAt = Date.now();
+  const padL = 46, padR = 12, padT = 12, padB = 22;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const midY = padT + plotH / 2;
+  const viewEnd = CHART.endAt, viewStart = viewEnd - CHART.viewMs;
+  const positions = (STATE.series && STATE.series.positions) || [];
 
-  // non-center entities arranged around the token
-  const around = ents.filter((e) => e.type !== "TOKEN");
-  around.forEach((e, idx) => {
-    const ang = (idx / Math.max(around.length, 1)) * Math.PI * 2 + wob;
-    const R = 108 + Math.sin(wob * 2 + idx) * 5;
-    const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * (R * 0.6);
-    const col = ET[e.type] || COL.muted;
-    ctx.strokeStyle = STATE.focusEntity === e.id ? col : "rgba(120,120,90,0.3)";
-    ctx.lineWidth = STATE.focusEntity === e.id ? 2 : 1;
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke();
-    graphNodes.push({ id: e.id, x, y, r: 9, ent: e });
+  // Y scale: symmetric around 0 so the 0-line sits in the middle. Fit visible data.
+  let yMax = 20;
+  for (const p of positions) for (const pt of p.points) {
+    if (pt.t < viewStart - CHART.viewMs || pt.t > viewEnd) continue;
+    yMax = Math.max(yMax, Math.abs(pt.pnl));
+  }
+  yMax = Math.ceil(yMax / 10) * 10;
+  const X = (t) => padL + ((t - viewStart) / CHART.viewMs) * plotW;
+  const Y = (pnl) => midY - (Math.max(-yMax, Math.min(yMax, pnl)) / yMax) * (plotH / 2);
+
+  // grid + axes
+  ctx.fillStyle = "#f6f2e6"; ctx.fillRect(padL, padT, plotW, plotH);
+  ctx.strokeStyle = COL.line; ctx.lineWidth = 1; ctx.font = "12px VT323"; ctx.textBaseline = "middle";
+  for (const frac of [1, 0.5, 0, -0.5, -1]) {
+    const yy = midY - frac * (plotH / 2); const val = Math.round(frac * yMax);
+    ctx.strokeStyle = frac === 0 ? COL.ink : "rgba(180,170,140,0.5)";
+    ctx.lineWidth = frac === 0 ? 1.5 : 1;
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + plotW, yy); ctx.stroke();
+    ctx.fillStyle = frac === 0 ? COL.ink : COL.muted; ctx.textAlign = "right";
+    ctx.fillText((val > 0 ? "+" : "") + val + "%", padL - 5, yy);
+  }
+  // vertical time gridlines (5 ticks)
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (let k = 0; k <= 4; k++) {
+    const t = viewStart + (k / 4) * CHART.viewMs; const xx = X(t);
+    ctx.strokeStyle = "rgba(180,170,140,0.3)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(xx, padT); ctx.lineTo(xx, padT + plotH); ctx.stroke();
+    ctx.fillStyle = COL.muted; ctx.fillText(hms(t), xx, padT + plotH + 5);
+  }
+
+  // clip to plot, draw each position's profit line
+  ctx.save(); ctx.beginPath(); ctx.rect(padL, padT, plotW, plotH); ctx.clip();
+  const heads = [];
+  for (const p of positions) {
+    const pts = p.points.filter((pt) => pt.t >= viewStart - CHART.viewMs && pt.t <= viewEnd + 1000);
+    if (pts.length === 0) continue;
+    const up = (p.curPnl ?? 0) >= 0;
+    const col = up ? COL.green : COL.red;
+    ctx.strokeStyle = col; ctx.lineWidth = p.status === "OPEN" || p.status === "PARTIAL" ? 2 : 1.2;
+    ctx.globalAlpha = p.closedAtMs ? 0.5 : 1;
+    ctx.beginPath();
+    pts.forEach((pt, idx) => { const xx = X(pt.t), yy = Y(pt.pnl); idx ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); });
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    const last = pts[pts.length - 1];
+    if (last.t >= viewStart && last.t <= viewEnd) heads.push({ p, x: X(last.t), y: Y(last.pnl), col });
+  }
+  ctx.restore();
+
+  // heads: coin image (or fallback avatar) + symbol + live pnl, drawn over the plot
+  for (const hd of heads) {
+    const { p, x, y, col } = hd; const r = 11;
+    ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.closePath();
+    ctx.fillStyle = "#fff"; ctx.fill(); ctx.clip();
+    const im = coinImg(p.mint);
+    if (im.complete && im.naturalWidth > 0 && !im._failed) ctx.drawImage(im, x - r, y - r, r * 2, r * 2);
+    else { ctx.fillStyle = col; ctx.fillRect(x - r, y - r, r * 2, r * 2); ctx.fillStyle = "#fff"; ctx.font = "12px VT323"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText((p.symbol || "?")[0].toUpperCase(), x, y); }
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = col; ctx.font = "12px VT323"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(`$${p.symbol} ${(p.curPnl >= 0 ? "+" : "") + Math.round(p.curPnl)}%`, x + r + 3, y);
+  }
+
+  if (positions.length === 0) {
+    ctx.fillStyle = COL.muted; ctx.font = "15px VT323"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("no positions yet — bought coins plot here from 0% at buy time", padL + plotW / 2, midY);
+  }
+  requestAnimationFrame(drawProfitChart);
+}
+function setupChartInput(cv) {
+  cv.style.cursor = "grab";
+  cv.addEventListener("mousedown", (e) => { CHART.drag = true; CHART.live = false; CHART.lastX = e.clientX; cv.style.cursor = "grabbing"; setLiveBtn(); });
+  window.addEventListener("mouseup", () => { CHART.drag = false; if (pchartCv) pchartCv.style.cursor = "grab"; });
+  window.addEventListener("mousemove", (e) => {
+    if (!CHART.drag) return;
+    const plotW = (cv.clientWidth || 560) - 58;
+    CHART.endAt -= ((e.clientX - CHART.lastX) / plotW) * CHART.viewMs;
+    CHART.lastX = e.clientX;
+    CHART.endAt = Math.min(Date.now(), CHART.endAt);
   });
-  graphNodes.forEach(({ x, y, ent }) => {
-    const col = ET[ent.type] || COL.muted;
-    ctx.beginPath(); ctx.arc(x, y, STATE.focusEntity === ent.id ? 9 : 7, 0, 7); ctx.fillStyle = col; ctx.fill();
-    if (STATE.focusEntity === ent.id) { ctx.strokeStyle = COL.ink; ctx.lineWidth = 2; ctx.stroke(); }
-    ctx.fillStyle = COL.ink; ctx.font = "13px VT323"; ctx.textAlign = "center";
-    ctx.fillText(ent.label, x, y - 12); ctx.fillStyle = COL.muted; ctx.fillText(ent.sub || "", x, y + 21);
-  });
-  // center token
-  const tEnt = ents.find((e) => e.type === "TOKEN");
-  ctx.beginPath(); ctx.arc(cx, cy, i ? 14 : 8, 0, 7); ctx.fillStyle = i ? vcol((i && i.verdict) || "WATCH_ONLY") : COL.muted; ctx.fill();
-  ctx.strokeStyle = COL.ink; ctx.lineWidth = 2; ctx.stroke();
-  graphNodes.push({ id: "__token__", x: cx, y: cy, r: 16, ent: tEnt || { type: "TOKEN", label: i ? "$" + (i.symbol || "") : "", sub: (i && i.verdict) || "" } });
-  if (i) { ctx.fillStyle = COL.ink; ctx.font = "15px VT323"; ctx.textAlign = "center"; ctx.fillText("$" + (i.symbol || i.mint.slice(0, 5)), cx, cy + 34); }
-  requestAnimationFrame(drawGraph);
+  cv.addEventListener("wheel", (e) => { e.preventDefault(); zoom(e.deltaY > 0 ? 1.25 : 0.8); }, { passive: false });
 }
-function onGraphClick(ev) {
-  const rect = graphCv.getBoundingClientRect();
-  const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
-  let hit = null, best = 18;
-  for (const n of graphNodes) { const d = Math.hypot(mx - n.x, my - n.y); if (d < best) { best = d; hit = n; } }
-  if (!hit) return;
-  if (hit.id === "__token__") { STATE.focusEntity = null; $("#graph-focus").textContent = "the token under investigation — see Why & Evidence panels"; return; }
-  STATE.focusEntity = hit.id;
-  const e = hit.ent;
-  $("#graph-focus").innerHTML = `<b style="color:${ET[e.type] || COL.muted}">${esc(e.label)}</b> · ${esc(e.sub || "")} — ${esc(ENT_DESC[e.type] || "")}`;
-}
+function zoom(f) { CHART.viewMs = Math.max(2 * 60_000, Math.min(12 * 3600_000, CHART.viewMs * f)); }
+function setLiveBtn() { const b = $("#ch-live"); if (b) b.classList.toggle("rz-on", CHART.live); }
 
 // ── paper wallet (Mode 3 — simulated execution; never holds a key, never signs) ──
 function paperPosRow(p) {
@@ -537,9 +581,12 @@ $("#rz-filters").onclick = (e) => {
   renderReasoning();
 };
 $("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — the Council Room updates shortly` : `error: ${r.error}`; };
+$("#ch-out").onclick = () => zoom(1.6);
+$("#ch-in").onclick = () => zoom(1 / 1.6);
+$("#ch-live").onclick = () => { CHART.live = true; CHART.endAt = Date.now(); setLiveBtn(); };
 
 (async function boot() {
-  await loadAll(); drawGraph(); connectWs();
+  await loadAll(); drawProfitChart(); setLiveBtn(); connectWs();
   setInterval(loadAll, 10000);
   window.addEventListener("resize", () => { renderTable(); });
 })();

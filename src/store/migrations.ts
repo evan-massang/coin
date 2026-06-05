@@ -323,6 +323,21 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE signals ADD COLUMN regime TEXT;
     `,
   },
+  {
+    version: 9,
+    up: /* sql */ `
+      -- Per-paper-position profit trajectory: one row per pricing tick, storing
+      -- PnL % vs entry. Powers the dashboard "Profit x Time" chart. Pruned to a
+      -- rolling window so it stays small.
+      CREATE TABLE IF NOT EXISTS paper_price_samples (
+        position_id INTEGER NOT NULL,
+        at          INTEGER NOT NULL,
+        pnl_pct     REAL NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pps_pos ON paper_price_samples(position_id, at);
+      CREATE INDEX IF NOT EXISTS idx_pps_at ON paper_price_samples(at);
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

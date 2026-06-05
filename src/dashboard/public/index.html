@@ -36,14 +36,15 @@
       <!-- ── main grid ── -->
       <section class="maingrid">
         <div class="leftcol">
-          <!-- investigation graph -->
+          <!-- profit × time chart — the coins we actually bought (paper) -->
           <div class="panel">
-            <div class="panel-head"><span class="tag">● INVESTIGATE</span><h2>Investigation Graph · <span id="graph-token" class="muted">select a token</span></h2><span class="muted small" id="graph-stats">nodes 0</span></div>
-            <div class="graph-wrap">
-              <div class="legend col" id="legend"></div>
-              <canvas id="graph" width="560" height="320"></canvas>
+            <div class="panel-head"><span class="tag">📈 PROFIT × TIME</span><h2>your positions · profit since buy</h2>
+              <span class="chart-ctrls">
+                <a class="cfg" id="ch-out">– zoom</a><a class="cfg" id="ch-in">+ zoom</a><a class="cfg gold" id="ch-live">⊙ live</a>
+              </span>
             </div>
-            <div class="graph-focus muted small" id="graph-focus">click a node to inspect the relationship</div>
+            <canvas id="pchart" width="560" height="330"></canvas>
+            <div class="graph-focus muted small" id="pchart-hint">each line starts at 0% the moment you bought · green up / red down · <b>drag to slide</b> back in time · zoom buttons · ⊙ snaps to now</div>
           </div>
           <!-- live token table -->
           <div class="panel">

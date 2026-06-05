@@ -147,6 +147,7 @@ export class ExitEngine {
   private readonly intervalMs: number;
   private readonly exitedOnce = new Set<number>(); // throttle repeat EXIT_NOW alerts
   private ticking = false; // guard against overlapping ticks (batched pricing can be slow)
+  private lastPruneAt = 0; // throttles profit-sample pruning (paper only)
   private timer?: NodeJS.Timeout;
 
   constructor(
@@ -183,6 +184,12 @@ export class ExitEngine {
     const maxHoldMs = this.svc.settings.get("maxHoldMinutes") * 60_000;
     const now = Date.now();
 
+    // Keep the profit-chart sample table bounded (rolling ~6h), checked ~every 10m.
+    if (this.source === "paper" && now - this.lastPruneAt > 10 * 60_000) {
+      this.lastPruneAt = now;
+      this.svc.paper.pruneSamples(now - 6 * 60 * 60_000);
+    }
+
     // Price EVERY open position this tick (batched, ≤30/call) so a fast crash is
     // caught near the stop-loss threshold, not 30-60s later at −85%.
     const prices = await fetchDexSnapshots(open.map((p) => p.mint)).catch(() => new Map());
@@ -194,6 +201,12 @@ export class ExitEngine {
       // Track peak/last for the trailing stop.
       pos.lastPriceUsd = priceUsd;
       pos.peakPriceUsd = Math.max(pos.peakPriceUsd, priceUsd);
+
+      // Record the profit trajectory (PnL % vs entry) for the dashboard chart —
+      // paper positions only (the coins we actually "bought").
+      if (this.source === "paper" && pos.entryPriceUsd > 0) {
+        this.svc.paper.recordPriceSample(pos.id, now, (priceUsd / pos.entryPriceUsd - 1) * 100);
+      }
 
       const evalResult = evaluateExit(
         pos,

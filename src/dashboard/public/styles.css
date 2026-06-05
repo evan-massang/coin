@@ -76,6 +76,12 @@ a { color: var(--green-2); text-decoration: none; cursor: pointer; }
 .legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .graph-focus { margin-top: 8px; border-top: 1px dotted var(--line-2); padding-top: 7px; }
 
+/* profit × time chart */
+#pchart { width: 100%; background: #f6f2e6; border: 1px solid var(--line); border-radius: 4px; max-width: 100%; touch-action: none; }
+.chart-ctrls { display: flex; gap: 5px; margin-left: auto; }
+.chart-ctrls .cfg { cursor: pointer; }
+.chart-ctrls .cfg.rz-on { color: var(--ink); border-color: var(--ink); background: var(--panel-2); }
+
 /* token feed table */
 .feed { width: 100%; border-collapse: collapse; font-size: 16px; }
 .feed th { font-family: var(--pixel); font-size: 7px; color: var(--muted); text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); text-transform: uppercase; }

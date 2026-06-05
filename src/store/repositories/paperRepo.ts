@@ -62,6 +62,7 @@ export class PaperRepo {
       this.db.prepare("DELETE FROM paper_wallet").run();
       this.db.prepare("DELETE FROM paper_trades").run();
       this.db.prepare("DELETE FROM paper_positions").run();
+      this.db.prepare("DELETE FROM paper_price_samples").run();
       this.db
         .prepare(
           "INSERT INTO paper_wallet(id, starting_balance_sol, balance_sol, created_at, updated_at) VALUES (1,?,?,?,?)",
@@ -69,6 +70,31 @@ export class PaperRepo {
         .run(startingBalanceSol, startingBalanceSol, now, now);
     });
     tx();
+  }
+
+  /** Append a profit-trajectory point (PnL % vs entry) for an open paper position. */
+  recordPriceSample(positionId: number, at: number, pnlPct: number): void {
+    this.db.prepare("INSERT INTO paper_price_samples(position_id, at, pnl_pct) VALUES (?,?,?)").run(positionId, at, pnlPct);
+  }
+
+  /** Profit trajectories for the given positions: id → [{t, pnl}] ascending by time. */
+  samplesForPositions(ids: number[]): Map<number, Array<{ t: number; pnl: number }>> {
+    const out = new Map<number, Array<{ t: number; pnl: number }>>();
+    if (ids.length === 0) return out;
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(`SELECT position_id, at, pnl_pct FROM paper_price_samples WHERE position_id IN (${placeholders}) ORDER BY at ASC`)
+      .all(...ids) as Array<{ position_id: number; at: number; pnl_pct: number }>;
+    for (const r of rows) {
+      if (!out.has(r.position_id)) out.set(r.position_id, []);
+      out.get(r.position_id)!.push({ t: r.at, pnl: r.pnl_pct });
+    }
+    return out;
+  }
+
+  /** Drop samples older than the cutoff (rolling-window retention). */
+  pruneSamples(olderThanMs: number): void {
+    this.db.prepare("DELETE FROM paper_price_samples WHERE at < ?").run(olderThanMs);
   }
 
   recordFill(f: PaperFill): number {
