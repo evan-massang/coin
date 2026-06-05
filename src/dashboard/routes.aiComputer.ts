@@ -34,6 +34,21 @@ export function aiComputerRoutes(svc: Services): Router {
     res.json(svc.aiComputer.latest() ?? null);
   });
 
+  // Council Room: live roster + per-seat accuracy stats (Phase 7/9).
+  r.get("/council/stats", (_req, res) => {
+    res.json({
+      roster: svc.settings.get("councilMembers"),
+      opencodeEnabled: svc.settings.get("opencodeEnabled"),
+      stats: svc.council.memberStats(),
+    });
+  });
+
+  // Council journal — recent opinions (newest first), resolved where known.
+  r.get("/council/journal", (req, res) => {
+    const limit = Math.max(1, Math.min(200, parseInt(String(req.query.limit ?? "50"), 10) || 50));
+    res.json(svc.council.recent(limit));
+  });
+
   r.post("/ai-computer/approve/:id", (req, res) => {
     // Refuses wallet/financial/mutating actions by design.
     res.json(svc.aiComputer.approvals.approve(req.params.id));

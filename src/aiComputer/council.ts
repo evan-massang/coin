@@ -1,47 +1,31 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { CouncilRole } from "../council/roles.js";
+import { buildSystemPrompt, buildEvidencePrompt, parseVerdict, type CouncilEvidence, type CouncilVerdict } from "./councilShared.js";
 
-// Evidence-only "second opinion" via the Anthropic API. It reviews the facts the
-// engine already gathered and returns a small-weight confirm/caution signal — it
+// The Anthropic council seat. Reviews ONLY the engine's pre-digested evidence
+// from its assigned role and returns a small-weight confirm/caution verdict — it
 // is NEVER the final decision and can never override the safety gate. Optional
-// (needs a key); returns undefined without one.
+// (needs a key); returns undefined without one or on any error.
 
-const MODEL = "claude-haiku-4-5-20251001";
+export type { CouncilVerdict } from "./councilShared.js";
 
-const SYSTEM = `You are a second-opinion reviewer for a READ-ONLY Solana meme-coin signal engine.
-You are given evidence the engine already collected (safety facts, liquidity, holders, momentum).
-Give a brief risk review ONLY. You do not decide trades, you never tell the user to buy or sell,
-and you cannot override the engine's safety gate.
+const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
-Respond with STRICT JSON only:
-{"score": <0-100 integer how clean/credible the token looks>, "recommendation": "confirm" | "caution", "rationale": "<one sentence>"}`;
-
-export interface CouncilVerdict {
-  score: number;
-  recommendation: "confirm" | "caution";
-  rationale: string;
-}
-
-export async function councilReview(evidence: string, apiKey?: string): Promise<CouncilVerdict | undefined> {
-  if (!apiKey) return undefined;
+export async function anthropicReview(
+  evidence: CouncilEvidence,
+  opts: { apiKey?: string; role: CouncilRole; model?: string },
+): Promise<CouncilVerdict | undefined> {
+  if (!opts.apiKey) return undefined;
   try {
-    const client = new Anthropic({ apiKey });
+    const client = new Anthropic({ apiKey: opts.apiKey });
     const res = await client.messages.create({
-      model: MODEL,
+      model: opts.model || DEFAULT_MODEL,
       max_tokens: 300,
-      system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as unknown as Anthropic.MessageCreateParams["system"],
-      messages: [{ role: "user", content: `Evidence:\n${evidence}\n\nReview as strict JSON.` }],
+      system: [{ type: "text", text: buildSystemPrompt(opts.role), cache_control: { type: "ephemeral" } }] as unknown as Anthropic.MessageCreateParams["system"],
+      messages: [{ role: "user", content: `Evidence:\n${buildEvidencePrompt(evidence)}\n\nReview as strict JSON from your seat.` }],
     });
     const text = res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start < 0 || end <= start) return undefined;
-    const raw = JSON.parse(text.slice(start, end + 1)) as { score?: unknown; recommendation?: unknown; rationale?: unknown };
-    const score = typeof raw.score === "number" ? Math.max(0, Math.min(100, Math.round(raw.score))) : 50;
-    return {
-      score,
-      recommendation: raw.recommendation === "confirm" ? "confirm" : "caution",
-      rationale: typeof raw.rationale === "string" ? raw.rationale : "council review",
-    };
+    return parseVerdict(text);
   } catch {
     return undefined;
   }

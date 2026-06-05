@@ -136,6 +136,11 @@ export class OutcomeTracker {
       this.svc.fingerprints.markOutcome(s.mint, outcome);
     }
 
+    // Resolve any AI-council opinions on this mint → per-seat accuracy (Phase 7).
+    const councilOutcome: "win" | "loss" | undefined =
+      maxGainPct >= 100 ? "win" : maxDrawdownPct >= 50 ? "loss" : undefined;
+    if (councilOutcome) this.svc.council.resolve(s.mint, councilOutcome, maxGainPct);
+
     this.peaks.delete(id);
   }
 }

@@ -31,9 +31,11 @@ const vcol = (v) => VC[v] || COL.muted;
 const isBuy = (v) => v === "BUY_SMALL" || v === "BUY_STRONG";
 
 const STATE = {
-  signals: [], status: null, market: null, engine: null, council: null,
+  signals: [], status: null, market: null, engine: null, council: null, councilStats: null,
   selectedMint: null, selected: null, focusEntity: null, bootAt: Date.now(),
 };
+
+const ROLE_LABEL = { bull_analyst: "Bull Analyst", narrative_analyst: "Narrative Analyst", risk_analyst: "Risk Analyst", contrarian: "Contrarian", lead_reviewer: "Lead Reviewer" };
 
 // ── clock + uptime ──
 function tick() {
@@ -57,16 +59,17 @@ function ageStr(at) { return ageMs(Date.now() - at); }
 const topSignal = () => { const b = STATE.signals.filter((s) => isBuy(s.verdict)); return (b.length ? b : STATE.signals).slice().sort((a, z) => z.conviction - a.conviction)[0]; };
 
 async function loadAll() {
-  const [status, signals, market, engine, council] = await Promise.all([
+  const [status, signals, market, engine, council, councilStats] = await Promise.all([
     api("/status").catch(() => null),
     api("/signals?limit=120").catch(() => []),
     api("/market").catch(() => null),
     api("/engine-state").catch(() => null),
     api("/ai-computer/latest").catch(() => null),
+    api("/council/stats").catch(() => null),
   ]);
-  STATE.status = status; STATE.market = market; STATE.engine = engine; STATE.council = council;
+  STATE.status = status; STATE.market = market; STATE.engine = engine; STATE.council = council; STATE.councilStats = councilStats;
   STATE.signals = (signals || []).map((s) => ({ ...s, verdict: s.verdict })).reverse();
-  renderEngineState(); renderRegime(); renderAiNotes(); renderTable(); renderAlerts();
+  renderEngineState(); renderRegime(); renderCouncil(); renderTable(); renderAlerts();
   // Default selection = highest-conviction recent token.
   if (!STATE.selectedMint && STATE.signals.length) selectToken((topSignal() || STATE.signals[STATE.signals.length - 1]).mint);
   else if (STATE.selectedMint) refreshSelected();
@@ -95,15 +98,47 @@ function renderRegime() {
   $("#feed-rate").textContent = rate + "/min";
 }
 
-// ── AI notes (shrunk; confirmation only, never overrides safety) ──
-function renderAiNotes() {
-  const c = STATE.council && STATE.council.council;
-  if (!c) { $("#ai-notes").innerHTML = `<div class="muted small">add an Anthropic key + run AI research in CONFIG → never overrides safety</div>`; return; }
-  const bull = c.recommendation === "confirm";
-  $("#ai-notes").innerHTML =
-    `<div class="note-rec ${bull ? "green" : "gold"}">${bull ? "▲ BULLISH" : "△ CAUTION"} · ${c.score}%</div>` +
-    `<div class="muted small" style="margin-top:6px">${esc((c.rationale || "").slice(0, 160))}</div>` +
-    `<div class="muted small" style="margin-top:6px">research only — cannot change the safety verdict</div>`;
+// ── Council Room: specialist multi-model panel (advisory only) ──
+function recBadge(rec) { const bull = rec === "confirm"; return `<span class="cm-rec ${bull ? "green" : "gold"}">${bull ? "▲ CONFIRM" : "△ CAUTION"}</span>`; }
+function renderCouncil() {
+  const res = STATE.council;
+  const members = (res && res.members) || [];
+  const consensus = res && res.consensus;
+  const cs = STATE.councilStats || {};
+  const statsMap = {}; for (const s of cs.stats || []) statsMap[s.memberId] = s;
+
+  if (res) { const sig = STATE.signals.find((x) => x.mint === res.mint); $("#council-token").textContent = sig ? "$" + (sig.symbol || res.mint.slice(0, 5)) : res.mint.slice(0, 6) + "…"; }
+  else $("#council-token").textContent = "—";
+
+  if (!members.length) {
+    const roster = cs.roster || [];
+    const active = roster.filter((m) => m.enabled && (m.provider === "anthropic" || cs.opencodeEnabled));
+    $("#council-members").innerHTML = `<div class="muted small">enable seats + run AI research in CONFIG → the council never overrides safety, risk, or the verdict</div>`
+      + (roster.length ? `<div class="muted small" style="margin-top:8px">seats: ${roster.map((m) => `${esc(m.label)} <span class="cm-role">${ROLE_LABEL[m.role] || m.role}</span>`).join(" · ")}<br>active now: ${active.length} ${cs.opencodeEnabled ? "" : "(opencode council off)"}</div>` : "");
+    $("#council-consensus").innerHTML = "";
+    return;
+  }
+
+  $("#council-members").innerHTML = members.map((m) => {
+    const st = statsMap[m.id];
+    const acc = st && st.resolved ? `accuracy ${Math.round(st.accuracy * 100)}% · ${st.resolved} resolved · weight ${st.weight.toFixed(2)}` : (st && st.total ? `${st.total} logged · learning` : "");
+    return `<div class="cm-row">
+      <div class="cm-head"><span class="cm-name">${esc(m.label)}</span><span class="cm-role">${ROLE_LABEL[m.role] || m.role}</span>${recBadge(m.recommendation)} <b>${m.score}%</b></div>
+      <div class="cm-rationale">${esc((m.rationale || "").slice(0, 160))}</div>
+      ${acc ? `<div class="cm-acc">${acc}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  if (consensus) {
+    const bull = consensus.recommendation === "confirm";
+    $("#council-consensus").innerHTML = `<div class="consensus-box">
+      <div class="ck">CONSENSUS · ${consensus.members} SEAT${consensus.members > 1 ? "S" : ""}</div>
+      <div class="consensus-score ${bull ? "green" : "gold"}">${bull ? "▲ BULLISH" : "△ CAUTION"} · ${consensus.score}%</div>
+      <div class="consensus-bar"><i style="width:${consensus.score}%;background:${bull ? COL.green : COL.gold}"></i></div>
+      <div class="consensus-shared">${consensus.bullModels}/${consensus.members} bullish · agreement ${consensus.agreement}%${consensus.sharedEvidence && consensus.sharedEvidence.length ? " · " + esc(consensus.sharedEvidence.join("; ")) : ""}</div>
+      <div class="muted small" style="margin-top:6px">advisory only — never overrides safety, risk, or the verdict</div>
+    </div>`;
+  } else $("#council-consensus").innerHTML = "";
 }
 
 // ── observed-token table (State / Conviction / Evidence + clickable) ──
@@ -318,8 +353,12 @@ const CFG = [
   { k: "minConviction", label: "min conviction notify", t: "number" },
   { k: "riskMode", label: "risk mode", t: "select", opts: ["microfish", "fixed"] },
   { k: "heliusApiKey", label: "helius key", t: "secret" },
-  { k: "anthropicApiKey", label: "anthropic key (AI notes)", t: "secret" },
+  { k: "anthropicApiKey", label: "anthropic key (Claude seat)", t: "secret" },
   { k: "rugcheckApiKey", label: "rugcheck key", t: "secret" },
+  { k: "opencodeEnabled", label: "opencode council (GPT/DeepSeek/Qwen)", t: "checkbox" },
+  { k: "opencodeAutoServe", label: "auto-start opencode server", t: "checkbox" },
+  { k: "opencodeModel", label: "opencode default model", t: "text" },
+  { k: "opencodePort", label: "opencode port", t: "number" },
 ];
 async function openConfig() {
   const s = await api("/settings"); const form = $("#cfgform");
@@ -344,7 +383,7 @@ async function saveConfig() {
 }
 $("#open-config").onclick = openConfig;
 $("#close-config").onclick = () => $("#config").classList.remove("open");
-$("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — check AI Notes shortly` : `error: ${r.error}`; };
+$("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — the Council Room updates shortly` : `error: ${r.error}`; };
 
 (async function boot() {
   await loadAll(); drawGraph(); connectWs();

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { DB } from "./db.js";
 import type { SettingChange } from "../types.js";
+import { CouncilMemberConfigSchema, DEFAULT_COUNCIL } from "../council/roles.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typed settings, persisted as JSON key/value rows in the `settings` table and
@@ -72,6 +73,19 @@ export const SettingsSchema = z.object({
   anthropicApiKey: z.string().default(""),
   rugcheckApiKey: z.string().default(""),
   lunarcrushApiKey: z.string().default(""),
+
+  // ── AI Council (multi-model; advisory only — never overrides safety/risk) ──
+  /** Master switch for the OpenCode-routed council seats (GPT-4o/DeepSeek/Qwen…). */
+  opencodeEnabled: z.boolean().default(false),
+  /** Spawn `opencode serve` ourselves. Default off — on Windows, run it yourself. */
+  opencodeAutoServe: z.boolean().default(false),
+  opencodePort: z.number().int().min(1).max(65535).default(4096),
+  /** Command to spawn when auto-serving (override for a full path / wrapper). */
+  opencodeBin: z.string().default("opencode"),
+  /** Fallback model for any OpenCode seat that doesn't pin its own. */
+  opencodeModel: z.string().default("openai/gpt-4o"),
+  /** The council roster (seats, roles, providers, models, enabled). */
+  councilMembers: z.array(CouncilMemberConfigSchema).default(DEFAULT_COUNCIL),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

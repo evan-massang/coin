@@ -1,26 +1,44 @@
 import type { DB } from "../store/db.js";
 import type { SettingsStore } from "../store/settingsStore.js";
-import type { RugcheckCache } from "../sources/rugcheckCache.js";
 import type { TokensRepo } from "../store/repositories/tokensRepo.js";
+import type { CouncilRepo } from "../store/repositories/councilRepo.js";
+import type { GraphIntel } from "../types.js";
 import { TaskQueue } from "./taskQueue.js";
 import { AuditLog } from "./auditLog.js";
 import { ApprovalQueue } from "./humanApproval.js";
 import { captureEvidence } from "./browserAgent.js";
 import { saveScreenshot } from "./screenshotEvidence.js";
-import { councilReview, type CouncilVerdict } from "./council.js";
 import { checkAction } from "./actionPolicy.js";
+import { anthropicReview } from "./council.js";
+import { opencodeReview } from "./opencodeCouncil.js";
+import { OpencodeServer } from "./opencodeServer.js";
+import type { CouncilEvidence, CouncilMemberResult, CouncilVerdict } from "./councilShared.js";
+import { evidenceFromIntel, sparseEvidence } from "../council/evidence.js";
+import { buildConsensus, type Consensus } from "../council/consensus.js";
+import type { CouncilMemberConfig } from "../council/roles.js";
 import { log } from "../util/logger.js";
 
 // Orchestrates a READ-ONLY research task: open the allowlisted data pages for a
-// mint (headless, screenshot only), audit every action, then ask the council
-// for an evidence-only second opinion. Runs on a background queue so it NEVER
-// blocks the scanner. It cannot click, connect a wallet, or trade.
+// mint (headless, screenshot only, audited), then convene the AI COUNCIL — a
+// panel of role-specialised seats (Claude + any models via OpenCode) that review
+// the engine's pre-digested evidence and return advisory confirm/caution
+// verdicts, blended into a consensus. Runs on a background queue so it NEVER
+// blocks the scanner; it cannot click, connect a wallet, trade, or change a score.
+
+/** Minimal live context the council reads (structurally satisfied by RuntimeState). */
+export interface CouncilContext {
+  intel: Map<string, GraphIntel>;
+  marketRegime?: string;
+}
 
 export interface AiComputerResult {
   taskId: string;
   mint: string;
   at: number;
+  /** Back-compat single verdict = the consensus (or undefined if no seat ran). */
   council?: CouncilVerdict;
+  members?: CouncilMemberResult[];
+  consensus?: Consensus;
   evidence: Array<{ url: string; ok: boolean; reason: string; screenshotPath?: string }>;
 }
 
@@ -29,13 +47,15 @@ export class AiComputer {
   readonly approvals = new ApprovalQueue();
   private readonly queue = new TaskQueue();
   private readonly results = new Map<string, AiComputerResult>();
+  private readonly opencode = new OpencodeServer();
   private counter = 0;
 
   constructor(
     db: DB,
     private readonly settings: SettingsStore,
-    private readonly rugcheck: RugcheckCache,
     private readonly tokens: TokensRepo,
+    private readonly ctx: CouncilContext,
+    private readonly councilJournal: CouncilRepo,
   ) {
     this.audit = new AuditLog(db);
   }
@@ -51,7 +71,7 @@ export class AiComputer {
     return this.results.get(taskId);
   }
 
-  /** Most recent completed research result (for the dashboard council panel). */
+  /** Most recent completed research result (for the dashboard Council Room). */
   latest(): AiComputerResult | undefined {
     let best: AiComputerResult | undefined;
     for (const r of this.results.values()) if (!best || r.at > best.at) best = r;
@@ -62,14 +82,19 @@ export class AiComputer {
     return this.queue.size;
   }
 
+  /** Kill the auto-spawned OpenCode server (if any) on shutdown. */
+  shutdownOpencode(): void {
+    this.opencode.stop();
+  }
+
   private async run(taskId: string, mint: string): Promise<void> {
-    const evidence: AiComputerResult["evidence"] = [];
+    // 1. Read-only browser evidence (audited screenshots) — unchanged.
+    const pages: AiComputerResult["evidence"] = [];
     const urls = [
       `https://rugcheck.xyz/tokens/${mint}`,
       `https://dexscreener.com/solana/${mint}`,
       `https://solscan.io/token/${mint}`,
     ];
-
     for (const url of urls) {
       const decision = checkAction({ type: "navigate", url });
       const cap = decision.allowed ? await captureEvidence(url) : { available: true, error: decision.reason };
@@ -77,23 +102,69 @@ export class AiComputer {
       const ok = decision.allowed && !cap.error;
       const reason = cap.error ?? decision.reason;
       this.audit.record({ at: Date.now(), taskId, actionType: "navigate", url, allowed: ok, reason, screenshotPath });
-      evidence.push({ url, ok, reason, screenshotPath });
+      pages.push({ url, ok, reason, screenshotPath });
     }
 
-    // Build evidence text from facts the engine already has (no scraping needed).
-    const report = await this.rugcheck.getReport(mint, { apiKey: this.settings.get("rugcheckApiKey") || undefined }).catch(() => undefined);
-    const meta = this.tokens.get(mint);
-    const evidenceText = [
-      `mint: ${mint}`,
-      `name/symbol: ${meta?.name ?? "?"} / ${meta?.symbol ?? "?"}`,
-      report
-        ? `rugcheck: risk=${report.riskLevel} honeypot=${report.honeypot} topHolder=${report.topHolderPct ?? "?"}% liquidity=$${Math.round(report.totalLiquidityUsd ?? 0)} lpLocked=${report.lpLockedPct ?? "?"}%`
-        : "rugcheck: (no data)",
-    ].join("\n");
+    // 2. Convene the council over the engine's interpreted evidence (not raw data).
+    const evidence = this.councilEvidence(mint);
+    const roster = this.activeRoster();
+    const needsOpencode = roster.some((m) => m.provider === "opencode");
+    const baseUrl = needsOpencode
+      ? await this.opencode.ensure({
+          enabled: this.settings.get("opencodeEnabled"),
+          autoServe: this.settings.get("opencodeAutoServe"),
+          port: this.settings.get("opencodePort"),
+          bin: this.settings.get("opencodeBin"),
+        })
+      : undefined;
 
-    const council = await councilReview(evidenceText, this.settings.get("anthropicApiKey") || undefined);
-    this.results.set(taskId, { taskId, mint, at: Date.now(), council, evidence });
-    log.info(`ai-computer: research done for ${mint.slice(0, 8)} (${council ? council.recommendation : "council off"})`);
+    const settled = await Promise.allSettled(roster.map((m) => this.runMember(m, evidence, baseUrl)));
+    const members = settled
+      .map((r) => (r.status === "fulfilled" ? r.value : undefined))
+      .filter((x): x is CouncilMemberResult => !!x);
+
+    const consensus = buildConsensus(members, evidence, this.councilJournal.weights());
+    const council: CouncilVerdict | undefined = consensus
+      ? { score: consensus.score, recommendation: consensus.recommendation, rationale: consensus.rationale }
+      : undefined;
+
+    // 3. Journal every seat's opinion for accuracy tracking (resolved later).
+    const now = Date.now();
+    for (const m of members) {
+      this.councilJournal.record({
+        at: now, mint, symbol: evidence.symbol, memberId: m.id, label: m.label,
+        role: m.role, model: m.model, score: m.score, recommendation: m.recommendation, rationale: m.rationale,
+      });
+    }
+
+    this.results.set(taskId, { taskId, mint, at: now, council, members, consensus, evidence: pages });
+    log.info(`ai-computer: council done for ${mint.slice(0, 8)} — ${members.length} seat(s), consensus ${consensus ? consensus.recommendation + " " + consensus.score : "none"}`);
+  }
+
+  /** Seats that should run now: enabled + their provider is available. */
+  private activeRoster(): CouncilMemberConfig[] {
+    const s = this.settings.all();
+    return s.councilMembers.filter((m) =>
+      m.enabled && (m.provider === "anthropic" ? !!s.anthropicApiKey : s.opencodeEnabled),
+    );
+  }
+
+  private councilEvidence(mint: string): CouncilEvidence {
+    const intel = this.ctx.intel.get(mint);
+    if (intel) return evidenceFromIntel(intel, this.ctx.marketRegime);
+    return sparseEvidence(this.tokens.get(mint)?.symbol, this.ctx.marketRegime);
+  }
+
+  private async runMember(m: CouncilMemberConfig, evidence: CouncilEvidence, baseUrl?: string): Promise<CouncilMemberResult | undefined> {
+    const t0 = Date.now();
+    let v: CouncilVerdict | undefined;
+    if (m.provider === "anthropic") {
+      v = await anthropicReview(evidence, { apiKey: this.settings.get("anthropicApiKey") || undefined, role: m.role, model: m.model || undefined });
+    } else if (m.provider === "opencode" && baseUrl) {
+      v = await opencodeReview(evidence, { baseUrl, model: m.model || this.settings.get("opencodeModel"), role: m.role });
+    }
+    if (!v) return undefined;
+    return { ...v, id: m.id, label: m.label, role: m.role, model: m.model || undefined, ms: Date.now() - t0 };
   }
 }
 

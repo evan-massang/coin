@@ -10,6 +10,7 @@ import { WalletsRepo } from "./store/repositories/walletsRepo.js";
 import { CreatorHistoryRepo } from "./store/repositories/creatorHistoryRepo.js";
 import { FingerprintRepo } from "./store/repositories/fingerprintRepo.js";
 import { WalletClusterRepo } from "./store/repositories/walletClusterRepo.js";
+import { CouncilRepo } from "./store/repositories/councilRepo.js";
 import { EventRecorder } from "./replay/eventRecorder.js";
 import { AiComputer } from "./aiComputer/aiComputer.js";
 import { WsHub } from "./dashboard/websocket.js";
@@ -33,6 +34,8 @@ export interface RuntimeState {
   /** Latest per-token graph intelligence (recent tokens), for detail panels. */
   intel: Map<string, GraphIntel>;
   engineState: EngineState;
+  /** Latest classified market regime (set by the /market route) — council context. */
+  marketRegime?: string;
 }
 
 /**
@@ -55,6 +58,7 @@ export interface Services {
   creatorHistory: CreatorHistoryRepo;
   fingerprints: FingerprintRepo;
   walletCluster: WalletClusterRepo;
+  council: CouncilRepo;
   events: EventRecorder;
   aiComputer: AiComputer;
   hub: WsHub;
@@ -76,10 +80,18 @@ export function createServices(db: DB = getDb()): Services {
   const creatorHistory = new CreatorHistoryRepo(db);
   const fingerprints = new FingerprintRepo(db);
   const walletCluster = new WalletClusterRepo(db);
+  const council = new CouncilRepo(db);
   const events = new EventRecorder(db);
   const hub = new WsHub();
   const rugcheck = new RugcheckCache();
-  const aiComputer = new AiComputer(db, settings, rugcheck, tokens);
+  // Runtime is built up-front so the AI council can read live graph intelligence
+  // + market regime when forming opinions.
+  const runtime: RuntimeState = {
+    wallet: { address: settings.get("walletAddress"), connected: false },
+    intel: new Map(),
+    engineState: { observing: 0, decisionReady: 0, highConviction: 0, highRisk: 0 },
+  };
+  const aiComputer = new AiComputer(db, settings, tokens, runtime, council);
 
   const dispatcher = new AlertDispatcher({
     settings,
@@ -103,15 +115,12 @@ export function createServices(db: DB = getDb()): Services {
     creatorHistory,
     fingerprints,
     walletCluster,
+    council,
     events,
     aiComputer,
     hub,
     rugcheck,
     dispatcher,
-    runtime: {
-      wallet: { address: settings.get("walletAddress"), connected: false },
-      intel: new Map(),
-      engineState: { observing: 0, decisionReady: 0, highConviction: 0, highRisk: 0 },
-    },
+    runtime,
   };
 }

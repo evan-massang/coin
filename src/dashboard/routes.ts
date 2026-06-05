@@ -70,6 +70,7 @@ export function coreRoutes(svc: Services): Router {
       buyRate: st.total ? buys / st.total : 0,
       avoidRate: st.total ? (st.byVerdict.AVOID ?? 0) / st.total : 0,
     });
+    svc.runtime.marketRegime = regime.regime; // share with the AI council
     res.json({ weather: weather.weather, multiplier: weather.multiplier, reasons: weather.reasons, regime, ...macro });
   });
 

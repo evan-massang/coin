@@ -121,8 +121,21 @@ a { color: var(--green-2); text-decoration: none; cursor: pointer; }
 .wxline b { font-size: 15px; }
 .ok { color: var(--green); } .warn { color: var(--gold); } .part { color: var(--blue); }
 
-/* ai notes */
-#ai-notes .note-rec { font-family: var(--pixel); font-size: 9px; }
+/* council room */
+.cm-row { border-bottom: 1px dotted var(--line-2); padding: 7px 0; }
+.cm-head { display: flex; align-items: baseline; gap: 6px; }
+.cm-name { font-family: var(--pixel); font-size: 8px; }
+.cm-role { font-size: 13px; color: var(--muted); flex: 1; }
+.cm-rec { font-family: var(--pixel); font-size: 7px; }
+.cm-rationale { font-size: 14px; color: var(--ink); margin-top: 3px; }
+.cm-acc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.cm-off { color: var(--muted); }
+.consensus-box { margin-top: 10px; border: 1px solid var(--line-2); border-radius: 5px; padding: 9px; background: var(--panel); }
+.consensus-box .ck { font-family: var(--pixel); font-size: 7px; color: var(--muted); }
+.consensus-score { font-family: var(--pixel); font-size: 14px; margin: 5px 0; }
+.consensus-bar { height: 10px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 3px; overflow: hidden; }
+.consensus-bar i { display: block; height: 100%; }
+.consensus-shared { font-size: 13px; color: var(--muted); margin-top: 6px; }
 
 /* ── evidence / conflict / timeline row ── */
 .botgrid { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }

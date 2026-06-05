@@ -295,6 +295,28 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE signals ADD COLUMN bear_count INTEGER;
     `,
   },
+  {
+    version: 7,
+    up: /* sql */ `
+      CREATE TABLE IF NOT EXISTS council_opinions (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        at             INTEGER NOT NULL,
+        mint           TEXT NOT NULL,
+        symbol         TEXT,
+        member_id      TEXT NOT NULL,
+        label          TEXT,
+        role           TEXT,
+        model          TEXT,
+        score          INTEGER,
+        recommendation TEXT,
+        rationale      TEXT,
+        outcome        TEXT,
+        max_gain_pct   REAL
+      );
+      CREATE INDEX IF NOT EXISTS idx_council_mint ON council_opinions(mint);
+      CREATE INDEX IF NOT EXISTS idx_council_member ON council_opinions(member_id);
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

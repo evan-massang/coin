@@ -7,6 +7,9 @@
 import { createServices } from "../src/services.js";
 import { startServer } from "../src/dashboard/server.js";
 import { computeGraphIntelligence } from "../src/graph/graphIntelligence.js";
+import { buildConsensus } from "../src/council/consensus.js";
+import { evidenceFromIntel } from "../src/council/evidence.js";
+import type { CouncilMemberResult } from "../src/aiComputer/councilShared.js";
 import { emptyScores, type Decision, type SafetyResult, type ScoreBreakdown, type Verdict } from "../src/types.js";
 
 const now = Date.now();
@@ -86,9 +89,50 @@ function seed(svc: ReturnType<typeof createServices>): void {
   };
 }
 
+function seedCouncil(svc: ReturnType<typeof createServices>): void {
+  const pepeMint = `SeedPEPE${"1".repeat(36)}`.slice(0, 44);
+  const intel = svc.runtime.intel.get(pepeMint);
+  const members: CouncilMemberResult[] = [
+    { id: "claude", label: "Claude", role: "bull_analyst", score: 78, recommendation: "confirm", rationale: "Smart-money cluster + organic buying — a real bull case, not just hype.", ms: 1180 },
+    { id: "gpt4o", label: "GPT-4o", role: "narrative_analyst", model: "openai/gpt-4o", score: 64, recommendation: "confirm", rationale: "Narrative is fresh though derivative; momentum is carrying it for now.", ms: 2090 },
+    { id: "deepseek", label: "DeepSeek", role: "risk_analyst", model: "deepseek/deepseek-chat", score: 57, recommendation: "caution", rationale: "Liquidity adequate but young; deployer still holds a large share.", ms: 1840 },
+    { id: "qwen", label: "Qwen", role: "contrarian", model: "qwen/qwen-max", score: 51, recommendation: "caution", rationale: "Cluster confidence may be overstated; float is thin enough to reverse fast.", ms: 1660 },
+  ];
+  const evidence = intel ? evidenceFromIntel(intel, "ACCUMULATION") : undefined;
+  const consensus = evidence ? buildConsensus(members, evidence) : undefined;
+  const council = consensus ? { score: consensus.score, recommendation: consensus.recommendation, rationale: consensus.rationale } : undefined;
+  // Dev-only injection of a completed council result (the results map is private).
+  (svc.aiComputer as unknown as { results: Map<string, unknown> }).results.set("seed_demo", {
+    taskId: "seed_demo", mint: pepeMint, at: now, council, members, consensus, evidence: [],
+  });
+
+  // Journal history → per-seat accuracy + bounded dynamic weights.
+  const defs: Array<[string, string, string, number]> = [
+    ["claude", "Claude", "bull_analyst", 0.78],
+    ["gpt4o", "GPT-4o", "narrative_analyst", 0.62],
+    ["deepseek", "DeepSeek", "risk_analyst", 0.71],
+    ["qwen", "Qwen", "contrarian", 0.55],
+  ];
+  for (let i = 0; i < 12; i++) {
+    const mint = `Hist${i}${"x".repeat(40)}`.slice(0, 44);
+    const win = Math.random() < 0.4;
+    for (const [id, label, role, acc] of defs) {
+      const correct = Math.random() < acc;
+      const rec: "confirm" | "caution" = win === correct ? "confirm" : "caution";
+      svc.council.record({
+        at: now - (12 - i) * 3_600_000, mint, symbol: `H${i}`, memberId: id, label, role, model: "",
+        score: rec === "confirm" ? 60 + Math.floor(Math.random() * 25) : 30 + Math.floor(Math.random() * 20),
+        recommendation: rec, rationale: "historical opinion",
+      });
+    }
+    svc.council.resolve(mint, win ? "win" : "loss", win ? 160 : 18);
+  }
+}
+
 async function mainSeed(): Promise<void> {
   const svc = createServices();
   seed(svc);
+  seedCouncil(svc);
   const { url } = await startServer(svc);
   // eslint-disable-next-line no-console
   console.log(`SEEDED DASHBOARD → ${url}`);

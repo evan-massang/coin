@@ -98,6 +98,7 @@ async function main(): Promise<void> {
       paperExits?.stop();
       outcomes?.stop();
       learning?.stop();
+      svc.aiComputer.shutdownOpencode();
       await close();
     } finally {
       process.exit(0);
