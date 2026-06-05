@@ -14,6 +14,11 @@ export interface MarketWeatherInputs {
   btcChange24h?: number;
   internalWinRate?: number;
   internalSamples?: number;
+  /** Min RESOLVED REAL trades before the engine's own win-rate is trusted to
+   *  flip weather to RISK_OFF. Below this we stay macro-only — a cold-start
+   *  guard so a tiny (or zero) traded sample can't force a false RISK_OFF that
+   *  floors every BUY to TINY size (Cycle 5). Default 20. */
+  minInternalSamples?: number;
   riskOffMultiplier: number;
 }
 
@@ -40,8 +45,12 @@ export function computeMarketWeather(i: MarketWeatherInputs): MarketWeatherResul
     }
   }
 
-  // Internal stats weighted higher (×2) once there's a meaningful sample.
-  if ((i.internalSamples ?? 0) >= 10 && i.internalWinRate !== undefined) {
+  // Internal stats weighted higher (×2) once there's a meaningful sample of
+  // REAL trades. The min-sample gate is a cold-start guard: with too few resolved
+  // trades the win-rate is noise (or, historically, the polluted ~1% rate over
+  // never-traded WATCH/AVOID tokens) and must NOT be allowed to force RISK_OFF.
+  const minSamples = i.minInternalSamples ?? 20;
+  if ((i.internalSamples ?? 0) >= minSamples && i.internalWinRate !== undefined) {
     if (i.internalWinRate >= 0.5) {
       bull += 2;
       reasons.push(`engine win rate ${(i.internalWinRate * 100).toFixed(0)}%`);
@@ -65,6 +74,7 @@ export async function fetchMarketWeather(
   getInternal: () => { winRate: number; samples: number },
   riskOffMultiplier: number,
   now = Date.now(),
+  minInternalSamples = 20,
 ): Promise<MarketWeatherResult> {
   if (cache && now - cache.at < 60_000) return cache.result;
 
@@ -78,6 +88,7 @@ export async function fetchMarketWeather(
     btcChange24h: macro.btcChange24h,
     internalWinRate: internal.winRate,
     internalSamples: internal.samples,
+    minInternalSamples,
     riskOffMultiplier,
   });
   cache = { at: now, result };

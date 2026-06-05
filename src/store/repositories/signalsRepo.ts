@@ -148,6 +148,30 @@ export class SignalsRepo {
       avgMaxDrawdownPct: avgDraw,
     };
   }
+
+  /**
+   * Win-rate over RESOLVED *traded* signals only (BUY_SMALL / BUY_STRONG that
+   * have a forward price path). This is "is THIS engine actually working" —
+   * unlike stats().winRate, which is computed over EVERY resolved signal and is
+   * therefore dominated by WATCH/AVOID tokens the engine never traded. Feeding
+   * that polluted rate into market weather forced a permanent false RISK_OFF
+   * (~1% win rate over never-traded tokens) that floored every BUY to TINY size
+   * via the 0.35 risk-off multiplier (Cycle 5 root-cause fix).
+   */
+  buyStats(): { winRate: number; samples: number; avgMaxGainPct: number } {
+    const resolved = this.db
+      .prepare(
+        "SELECT max_gain_pct FROM signals " +
+          "WHERE verdict IN ('BUY_SMALL','BUY_STRONG') AND max_gain_pct IS NOT NULL",
+      )
+      .all() as { max_gain_pct: number }[];
+    const wins = resolved.filter((r) => r.max_gain_pct >= 100).length; // ≥2x = "win"
+    return {
+      samples: resolved.length,
+      winRate: resolved.length ? wins / resolved.length : 0,
+      avgMaxGainPct: avg(resolved.map((r) => r.max_gain_pct)),
+    };
+  }
 }
 
 function avg(xs: number[]): number {

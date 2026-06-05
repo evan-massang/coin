@@ -340,7 +340,18 @@ export class EntryPipeline {
     // Phase 4: market weather (macro + the engine's own win rate) + source
     // agreement (do independent signals corroborate or conflict?).
     const wxStats = this.svc.signals.stats();
-    const weather = await fetchMarketWeather(() => ({ winRate: wxStats.winRate, samples: wxStats.total }), s.riskOffMultiplier);
+    // Weather's "is THIS engine working" signal must come from REAL trades only
+    // (resolved BUYs) — feeding it the all-signal win-rate (dominated by
+    // never-traded WATCH/AVOID tokens, ~1%) forced a permanent false RISK_OFF
+    // that floored every BUY to TINY size. Macro-only until ≥minWeatherSamples
+    // resolved BUYs exist, after which the real BUY win-rate re-engages the brake.
+    const buyStats = this.svc.signals.buyStats();
+    const weather = await fetchMarketWeather(
+      () => ({ winRate: buyStats.winRate, samples: buyStats.samples }),
+      s.riskOffMultiplier,
+      now,
+      s.minWeatherSamples,
+    );
     // Classify + record the regime at decision time (research enablement; headless-safe).
     const wxBuys = (wxStats.byVerdict.BUY_SMALL ?? 0) + (wxStats.byVerdict.BUY_STRONG ?? 0);
     decision.regime = classifyRegime({

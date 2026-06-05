@@ -28,6 +28,8 @@ export const SettingsSchema = z.object({
   minOrganicScore: z.number().min(0).max(100).default(55),
   maxLateEntryRisk: z.number().min(0).max(100).default(70),
   maxHoldMinutes: z.number().min(1).default(240),
+  /** Cut a position this far below entry (meme coins die fast). 0 disables. */
+  stopLossPct: z.number().min(0).max(0.9).default(0.45),
   minLiquidityUsd: z.number().min(0).default(3000),
 
   // ── Paper trading (Mode 3 — simulation only) ──
@@ -71,6 +73,11 @@ export const SettingsSchema = z.object({
   convictionConfidenceFloor: z.number().min(0.5).max(0.95).default(0.5),
   /** If real-evidence coverage (excl. social/hype) is below this, conviction is capped to WATCH. */
   minRealCoverage: z.number().min(0).max(1).default(0.5),
+  /** Min resolved REAL trades (BUYs) before the engine's own win-rate may flip
+   *  market weather to RISK_OFF. Below this, weather is macro-only — a cold-start
+   *  guard so a tiny traded sample can't false-trigger RISK_OFF and floor every
+   *  BUY to TINY (Cycle 5). Structural safety; NOT auto-tunable. */
+  minWeatherSamples: z.number().int().min(10).max(200).default(20),
 
   // ── Conviction weights (tunable by learning, within rails) ──
   weightOrganic: z.number().min(0).default(15),
