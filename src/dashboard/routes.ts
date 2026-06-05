@@ -56,10 +56,15 @@ export function coreRoutes(svc: Services): Router {
     const macro: { solChange24h?: number; btcChange24h?: number } = await getMarketMacro().catch(() => ({}));
     const weather = await fetchMarketWeather(
       () => {
-        const st = svc.signals.stats();
-        return { winRate: st.winRate, samples: st.total };
+        // REAL trades only (resolved BUYs) — must match entry.ts. Using the
+        // all-signal win-rate here poisons the panel into a false RISK_OFF and
+        // (via the runtime write below) clobbers the council's regime (Cycle 5).
+        const bs = svc.signals.buyStats();
+        return { winRate: bs.winRate, samples: bs.samples };
       },
       s.riskOffMultiplier,
+      undefined,
+      s.minWeatherSamples,
     ).catch(() => ({ weather: "NEUTRAL" as const, multiplier: 1, reasons: [] }));
     const st = svc.signals.stats();
     const buys = (st.byVerdict.BUY_SMALL ?? 0) + (st.byVerdict.BUY_STRONG ?? 0);
