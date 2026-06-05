@@ -1,5 +1,5 @@
 import type { Decision, ScoreBreakdown, SafetyResult, Verdict } from "../types.js";
-import { computeConviction, clamp, type ConvictionWeights } from "./conviction.js";
+import { computeConviction, realCoverage, clamp, type ConvictionWeights, type FacetConfidence } from "./conviction.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GATE → SCORE → CAP → VERDICT (§1.6). Priority order is strict:
@@ -18,6 +18,8 @@ export const ORGANIC_WATCH_CAP = 49;
 export const UNKNOWN_CAP = 59;
 /** Conviction cap applied when organic is below the user's min but ≥ WATCH band. */
 export const ORGANIC_SOFT_CAP = 59;
+/** Conviction cap when too few REAL-evidence facets actually computed (Cycle 1 fix). */
+export const LOW_COVERAGE_CAP = 49;
 /** Minimum conviction to surface as WATCH_ONLY rather than AVOID. */
 export const WATCH_MIN_CONVICTION = 40;
 
@@ -40,6 +42,12 @@ export interface DecisionInput {
   /** Extra human-readable reasons from upstream scorers. */
   reasons?: string[];
   flags?: string[];
+  /** Per-facet confidence (0..1). Absent ⇒ all facets trusted (legacy behaviour). */
+  confidence?: FacetConfidence;
+  /** Facets below this confidence are dropped from the conviction blend (default 0.5). */
+  convictionFloor?: number;
+  /** If real-evidence coverage falls below this, conviction is capped to WATCH (default 0.5). */
+  minRealCoverage?: number;
   at: number;
 }
 
@@ -49,9 +57,10 @@ export function decide(input: DecisionInput): Decision {
   const flags = [...(input.flags ?? [])];
   const caps: string[] = [];
 
-  // Base conviction (gate scores excluded). Computed up front for transparency
-  // even on early returns.
-  const base = computeConviction(scores, thresholds.weights);
+  // Base conviction (gate scores excluded). Confidence-aware: frozen/unknown
+  // facets are dropped rather than anchoring conviction at a neutral default.
+  const floor = input.convictionFloor ?? 0.5;
+  const base = computeConviction(scores, thresholds.weights, input.confidence, floor);
 
   const mk = (verdict: Verdict, conviction: number): Decision => ({
     mint: input.mint,
@@ -107,6 +116,16 @@ export function decide(input: DecisionInput): Decision {
     conviction = Math.min(conviction, UNKNOWN_CAP);
     caps.push(`${safety.unknownCount} unknown safety items⇒cap ${UNKNOWN_CAP}`);
     flags.push("safety-unknowns");
+  }
+
+  // Real-evidence coverage gate: if too little genuine evidence actually computed
+  // (e.g. token scored on <8 trades ⇒ organic/momentum unknown), cap to WATCH so
+  // a thin token can't reach BUY on the social/hype anchors alone (Cycle 1 fix).
+  const rc = realCoverage(thresholds.weights, input.confidence, floor);
+  if (rc < (input.minRealCoverage ?? 0.5)) {
+    conviction = Math.min(conviction, LOW_COVERAGE_CAP);
+    caps.push(`low-coverage(${Math.round(rc * 100)}%)⇒cap ${LOW_COVERAGE_CAP}`);
+    flags.push("low-coverage");
   }
 
   // Map capped conviction → verdict.

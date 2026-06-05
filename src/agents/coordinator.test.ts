@@ -10,6 +10,7 @@ function ctx(): AgentContext {
     firstSeenAt: 0,
     marketCapsSol: [],
     smartWallets: new Map(),
+    minBuys: 8,
     hype: async () => ({ score: 50, isRevival: false, source: "heuristic", rationale: "", tags: [] }),
   };
 }

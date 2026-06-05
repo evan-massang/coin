@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeConviction, clamp, type ConvictionWeights } from "./conviction.js";
+import { computeConviction, realCoverage, clamp, type ConvictionWeights } from "./conviction.js";
 import { emptyScores } from "../types.js";
 
 const W: ConvictionWeights = {
@@ -37,5 +37,31 @@ describe("computeConviction", () => {
     expect(clamp(150)).toBe(100);
     expect(clamp(-5)).toBe(0);
     expect(clamp(50)).toBe(50);
+  });
+
+  it("absent confidence ⇒ identical to legacy (every facet trusted)", () => {
+    const sc = { ...emptyScores(), organic: 80, momentum: 90, smartMoney: 85 };
+    expect(computeConviction(sc, W)).toBe(computeConviction(sc, W, {}, 0.5));
+  });
+
+  it("excludes facets below the confidence floor from BOTH numerator and denominator", () => {
+    const sc = { ...emptyScores(), organic: 88, momentum: 10 };
+    // only organic confident; momentum (low conf) and absent others (set to 0) are dropped
+    const conf = { organic: 0.9, momentum: 0.2, graduation: 0, devReputation: 0, smartMoney: 0, social: 0, hype: 0 };
+    expect(computeConviction(sc, W, conf, 0.5)).toBe(88); // organic alone — not dragged by momentum=10
+  });
+});
+
+describe("realCoverage (Cycle 1 fix)", () => {
+  it("is 1 when all real facets are confident, 0 when none are", () => {
+    expect(realCoverage(W, {}, 0.5)).toBe(1);
+    expect(realCoverage(W, { organic: 0, momentum: 0, graduation: 0, devReputation: 0, smartMoney: 0 }, 0.5)).toBe(0);
+  });
+  it("EXCLUDES social + hype — they alone cannot lift coverage", () => {
+    // only the narrative anchors are confident; every real facet is unknown ⇒ 0 coverage
+    expect(realCoverage(W, { organic: 0, momentum: 0, graduation: 0, devReputation: 0, smartMoney: 0, social: 1, hype: 1 }, 0.5)).toBe(0);
+  });
+  it("organic+momentum confident ⇒ just over half (45/87)", () => {
+    expect(realCoverage(W, { organic: 0.9, momentum: 0.9, graduation: 0, devReputation: 0, smartMoney: 0 }, 0.5)).toBeCloseTo((15 + 30) / (15 + 30 + 12 + 12 + 18), 3);
   });
 });

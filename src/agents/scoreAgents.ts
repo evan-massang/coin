@@ -14,7 +14,10 @@ const organicAgent: Agent = {
   id: "organic",
   run: (ctx) => {
     const r = computeOrganicScore(ctx.trades);
-    return { score: r.score, confidence: ctx.trades.length >= 8 ? 0.9 : 0.4, reasons: r.reasons.slice(0, 2), data: r };
+    // Sufficiency is BINARY: enough trades ⇒ trusted (0.9); else UNKNOWN (dropped
+    // from conviction) — no float mid-band that a 5-sniper cluster could exploit.
+    const enough = ctx.trades.length >= ctx.minBuys && !r.insufficient;
+    return { score: r.score, confidence: enough ? 0.9 : 0, unknown: !enough, reasons: r.reasons.slice(0, 2), data: r };
   },
 };
 
@@ -22,7 +25,8 @@ const momentumAgent: Agent = {
   id: "momentum",
   run: (ctx) => {
     const r = computeMomentum(ctx.trades, ctx.now);
-    return { score: r.score, confidence: ctx.trades.length >= 8 ? 0.9 : 0.4, reasons: r.reasons.slice(0, 2), data: r };
+    const enough = ctx.trades.length >= ctx.minBuys;
+    return { score: r.score, confidence: enough ? 0.9 : 0, unknown: !enough, reasons: r.reasons.slice(0, 2), data: r };
   },
 };
 
@@ -43,7 +47,9 @@ const devWalletAgent: Agent = {
   id: "devReputation",
   run: (ctx) => {
     const r = computeDevReputation({ devSold: ctx.devSold });
-    return { score: r.score, confidence: 0.5, reasons: r.reasons.slice(0, 1) };
+    // Only meaningful once we know whether the dev sold; otherwise it's the frozen 60 default.
+    const known = ctx.devSold !== undefined;
+    return { score: r.score, confidence: known ? 0.6 : 0, unknown: !known, reasons: r.reasons.slice(0, 1) };
   },
 };
 
@@ -51,7 +57,9 @@ const smartMoneyAgent: Agent = {
   id: "smartMoney",
   run: (ctx) => {
     const r = computeSmartMoney(ctx.trades, ctx.smartWallets);
-    return { score: r.score, confidence: ctx.smartWallets.size > 0 ? 0.8 : 0.2, reasons: r.reasons.slice(0, 1), data: r };
+    // With no tracked smart wallets there is nothing to detect ⇒ unknown (dropped), not a frozen 50.
+    const known = ctx.smartWallets.size > 0;
+    return { score: r.score, confidence: known ? 0.8 : 0, unknown: !known, reasons: r.reasons.slice(0, 1), data: r };
   },
 };
 

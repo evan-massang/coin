@@ -164,6 +164,8 @@ export interface Decision {
   evidenceCount?: number;
   bullCount?: number;
   bearCount?: number;
+  /** Market regime active when this decision fired (research enablement). */
+  regime?: string;
   at: number;
 }
 

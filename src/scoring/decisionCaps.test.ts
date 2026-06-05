@@ -36,6 +36,52 @@ function scores(p: Partial<ScoreBreakdown>): ScoreBreakdown {
 
 const at = 1_000;
 
+describe("decide() — confidence-aware coverage (Cycle 1 fix)", () => {
+  // organic shows the "insufficient" placeholder 45 (≥30 so no AVOID) but is UNKNOWN.
+  it("low real-coverage caps to WATCH even with high nominal scores (the 5-sniper case)", () => {
+    const d = decide({
+      mint: "M", at,
+      scores: scores({ organic: 45, momentum: 100, smartMoney: 100, hype: 80 }),
+      safety: safety(true),
+      thresholds: THRESHOLDS,
+      confidence: { organic: 0, momentum: 0, graduation: 0, devReputation: 0, smartMoney: 0, social: 0, hype: 1 },
+    });
+    expect(d.conviction).toBeLessThanOrEqual(49);
+    expect(d.verdict).not.toBe("BUY_SMALL");
+    expect(d.verdict).not.toBe("BUY_STRONG");
+    expect(d.flags).toContain("low-coverage");
+  });
+
+  it("social + hype alone cannot clear the gate", () => {
+    const d = decide({
+      mint: "M", at,
+      scores: scores({ organic: 45, social: 100, hype: 100 }),
+      safety: safety(true),
+      thresholds: THRESHOLDS,
+      confidence: { organic: 0, momentum: 0, graduation: 0, devReputation: 0, smartMoney: 0, social: 1, hype: 1 },
+    });
+    expect(d.conviction).toBeLessThanOrEqual(49);
+  });
+
+  it("a full-coverage active vector (organic+momentum confident) CAN reach BUY", () => {
+    const d = decide({
+      mint: "M", at,
+      scores: scores({ organic: 80, momentum: 85, graduation: 60, hype: 56 }),
+      safety: safety(true),
+      thresholds: THRESHOLDS,
+      confidence: { organic: 0.9, momentum: 0.9, graduation: 0.8, devReputation: 0, smartMoney: 0, social: 0, hype: 0.6 },
+    });
+    expect(d.conviction).toBeGreaterThanOrEqual(55);
+    expect(["BUY_SMALL", "BUY_STRONG"]).toContain(d.verdict);
+  });
+
+  it("absent confidence ⇒ legacy behaviour (no low-coverage cap)", () => {
+    const d = decide({ mint: "M", at, scores: scores({ organic: 80, momentum: 85, graduation: 60, smartMoney: 70, hype: 56 }), safety: safety(true), thresholds: THRESHOLDS });
+    expect(d.flags).not.toContain("low-coverage");
+    expect(["BUY_SMALL", "BUY_STRONG"]).toContain(d.verdict);
+  });
+});
+
 describe("decide() — gate → score → cap → verdict", () => {
   it("safety fail ⇒ AVOID even with a perfect score everywhere (incl. hype)", () => {
     const d = decide({

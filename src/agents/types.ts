@@ -28,6 +28,8 @@ export interface AgentContext {
   rugcheck?: RugcheckReport;
   devSold?: boolean;
   smartWallets: Map<string, number>;
+  /** Min trades required before organic/momentum carry confidence (sufficiency gate). */
+  minBuys: number;
   hype: (t: { mint: string; name?: string; symbol?: string }) => Promise<HypeResult>;
 }
 

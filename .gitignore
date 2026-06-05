@@ -28,3 +28,11 @@ ruvector.db
 # OS
 Thumbs.db
 .DS_Store
+
+# ruflo / agentdb runtime artifacts
+agentdb.rvf
+agentdb.rvf.lock
+ruvector.db
+
+# AI Computer screenshot evidence (runtime data)
+data/evidence/

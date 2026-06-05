@@ -82,6 +82,13 @@ function renderEngineState() {
   $("#es-ready").textContent = commas(e.decisionReady || 0);
   $("#es-conv").textContent = commas(e.highConviction || 0);
   $("#es-risk").textContent = commas(e.highRisk || 0);
+  // Honesty banner: if nothing is clearing the BUY gate, say WHY (not a UI bug).
+  const note = $("#idle-note"); if (!note) return;
+  const buys = STATE.signals.filter((s) => isBuy(s.verdict)).length;
+  if (buys === 0 && STATE.signals.length >= 40) {
+    note.style.display = "block";
+    note.innerHTML = `⚠ No BUY signals — most tokens are scored before reaching ~8 observed trades, so conviction is honestly capped to WATCH (<b>low-coverage</b>), not faked. The paper/council panels are idle for that reason — an observation-depth limit, not a UI fault. See docs/research/cycle-02.md.`;
+  } else note.style.display = "none";
 }
 
 // ── market regime ──

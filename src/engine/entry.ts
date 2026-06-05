@@ -21,6 +21,7 @@ import { fingerprintToken, isSimilarToRug } from "../graph/tokenSimilarity.js";
 import { deployerReputation } from "../graph/deployerGraph.js";
 import { clusterRisk } from "../graph/walletClusterGraph.js";
 import { computeGraphIntelligence } from "../graph/graphIntelligence.js";
+import { classifyRegime } from "../graph/marketRegime.js";
 import type { OrganicResult } from "./organicVolume.js";
 import type { MomentumResult } from "./momentum.js";
 import type { GraduationResult } from "./graduation.js";
@@ -216,6 +217,7 @@ export class EntryPipeline {
     const smartWallets = new Map<string, number>();
     for (const w of this.svc.wallets.byKind("copy")) smartWallets.set(w.address, w.score?.score ?? 50);
 
+    const s = this.svc.settings.all();
     // Phase 3: run the scoring facets as concurrent agents (the coordinator
     // never throws; a slow/failed agent degrades to a neutral unknown).
     const results = await runAgents(SCORE_AGENTS, {
@@ -227,6 +229,7 @@ export class EntryPipeline {
       rugcheck: tracked.rugcheck,
       devSold,
       smartWallets,
+      minBuys: s.minBuysToDecide,
       hype: (t) => this.hypeScorer.score(t),
     });
     const organicData = results.get("organic")?.data as OrganicResult | undefined;
@@ -272,24 +275,40 @@ export class EntryPipeline {
     if (devSold) flags.push("dev-sold");
     if (hypeData?.isRevival) flags.push("revival");
 
+    // Per-facet confidence: unknown agents (couldn't compute) are dropped from the
+    // conviction blend rather than anchoring it at a frozen default (Cycle 1 fix).
+    const conf = (id: string): number => { const r = results.get(id); return r?.unknown ? 0 : (r?.confidence ?? 1); };
+    const confidence = {
+      organic: conf("organic"), momentum: conf("momentum"), graduation: conf("graduation"),
+      devReputation: conf("devReputation"), smartMoney: conf("smartMoney"), social: conf("social"), hype: conf("hype"),
+    };
+
     const decision = decide({
       mint: token.mint,
       symbol: token.symbol,
       name: token.name,
       scores,
       safety: stage1,
-      thresholds: thresholdsFromSettings(this.svc.settings.all()),
+      thresholds: thresholdsFromSettings(s),
       reasons,
       flags,
+      confidence,
+      convictionFloor: s.convictionConfidenceFloor,
+      minRealCoverage: s.minRealCoverage,
       at: now,
     });
     // Phase 4: market weather (macro + the engine's own win rate) + source
     // agreement (do independent signals corroborate or conflict?).
-    const s = this.svc.settings.all();
-    const weather = await fetchMarketWeather(() => {
-      const st = this.svc.signals.stats();
-      return { winRate: st.winRate, samples: st.total };
-    }, s.riskOffMultiplier);
+    const wxStats = this.svc.signals.stats();
+    const weather = await fetchMarketWeather(() => ({ winRate: wxStats.winRate, samples: wxStats.total }), s.riskOffMultiplier);
+    // Classify + record the regime at decision time (research enablement; headless-safe).
+    const wxBuys = (wxStats.byVerdict.BUY_SMALL ?? 0) + (wxStats.byVerdict.BUY_STRONG ?? 0);
+    decision.regime = classifyRegime({
+      weather: weather.weather,
+      buyRate: wxStats.total ? wxBuys / wxStats.total : 0,
+      avoidRate: wxStats.total ? (wxStats.byVerdict.AVOID ?? 0) / wxStats.total : 0,
+    }).regime;
+    this.svc.runtime.marketRegime = decision.regime;
     const agreement = computeSourceAgreement({
       rugcheckClean: tracked.rugcheck ? !tracked.rugcheck.highRisk && tracked.rugcheck.riskLevel !== "danger" : undefined,
       bundleBad: bundle.detected,

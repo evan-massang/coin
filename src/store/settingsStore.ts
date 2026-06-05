@@ -57,6 +57,14 @@ export const SettingsSchema = z.object({
   minConvictionBuySmall: z.number().min(0).max(100).default(55),
   minConvictionBuyStrong: z.number().min(0).max(100).default(72),
 
+  // ── Evidence sufficiency (Cycle 1 fix — NOT auto-tunable; structural safety) ──
+  /** Min observed trades before organic/momentum carry confidence. Floored at 8. */
+  minBuysToDecide: z.number().int().min(8).max(50).default(8),
+  /** Facets below this confidence are dropped from the conviction blend. Floored at 0.5. */
+  convictionConfidenceFloor: z.number().min(0.5).max(0.95).default(0.5),
+  /** If real-evidence coverage (excl. social/hype) is below this, conviction is capped to WATCH. */
+  minRealCoverage: z.number().min(0).max(1).default(0.5),
+
   // ── Conviction weights (tunable by learning, within rails) ──
   weightOrganic: z.number().min(0).default(15),
   weightMomentum: z.number().min(0).default(30),

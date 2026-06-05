@@ -317,6 +317,12 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_council_member ON council_opinions(member_id);
     `,
   },
+  {
+    version: 8,
+    up: /* sql */ `
+      ALTER TABLE signals ADD COLUMN regime TEXT;
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

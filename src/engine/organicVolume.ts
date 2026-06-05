@@ -14,6 +14,8 @@ export interface OrganicResult {
   flags: string[];
   uniqueBuyerRatio?: number;
   freshWalletRatio?: number; // proxy: one-and-done buyer ratio
+  /** True when there were too few buys to actually judge (the 45 is a placeholder, not evidence). */
+  insufficient?: boolean;
 }
 
 const ROUND_SIZES = [0.1, 0.25, 0.5, 1, 2, 5, 10];
@@ -25,7 +27,7 @@ export function computeOrganicScore(trades: TradeEvent[]): OrganicResult {
 
   if (buys.length < 5) {
     // Not enough data to judge — neutral-low so it can't BUY on thin evidence.
-    return { score: 45, reasons: ["insufficient trade data"], flags: [] };
+    return { score: 45, reasons: ["insufficient trade data"], flags: [], insufficient: true };
   }
 
   let score = 100;

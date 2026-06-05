@@ -50,6 +50,8 @@ a { color: var(--green-2); text-decoration: none; cursor: pointer; }
 .t-v { font-family: var(--pixel); font-size: 28px; margin: 12px 0 6px; letter-spacing: 1px; }
 .t-d { font-size: 15px; color: var(--muted); }
 
+.idle-note { border: 1px solid var(--gold); border-left: 4px solid var(--gold); border-radius: 6px; background: #f7f0e1; color: var(--ink); font-size: 15px; padding: 9px 12px; margin-bottom: 12px; }
+
 /* ── panels ── */
 .panel { border: 1px solid var(--line-2); border-radius: 6px; padding: 12px; background: var(--paper); }
 .panel-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }

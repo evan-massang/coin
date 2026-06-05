@@ -26,6 +26,7 @@ export interface SignalRecord {
   evidenceCount?: number;
   bullCount?: number;
   bearCount?: number;
+  regime?: string;
   priceAtAlert?: number;
   price5m?: number;
   price15m?: number;
@@ -54,10 +55,10 @@ export class SignalsRepo {
       .prepare(
         `INSERT INTO signals(mint, symbol, at, verdict, conviction, scores, reasons, flags, caps, price_at_alert,
             risk_tier, suggested_risk_pct, max_position_sol, market_weather, source_agreement, red_flags,
-            state, coverage, conviction_tier, evidence_count, bull_count, bear_count)
+            state, coverage, conviction_tier, evidence_count, bull_count, bear_count, regime)
          VALUES (@mint, @symbol, @at, @verdict, @conviction, @scores, @reasons, @flags, @caps, @price,
             @riskTier, @suggestedRiskPct, @maxPositionSol, @marketWeather, @sourceAgreement, @redFlags,
-            @state, @coverage, @convictionTier, @evidenceCount, @bullCount, @bearCount)`,
+            @state, @coverage, @convictionTier, @evidenceCount, @bullCount, @bearCount, @regime)`,
       )
       .run({
         mint: d.mint,
@@ -82,6 +83,7 @@ export class SignalsRepo {
         evidenceCount: d.evidenceCount ?? null,
         bullCount: d.bullCount ?? null,
         bearCount: d.bearCount ?? null,
+        regime: d.regime ?? null,
       });
     return Number(info.lastInsertRowid);
   }
@@ -192,6 +194,7 @@ function rowToSignal(r: Record<string, unknown>): SignalRecord {
     evidenceCount: (r.evidence_count as number) ?? undefined,
     bullCount: (r.bull_count as number) ?? undefined,
     bearCount: (r.bear_count as number) ?? undefined,
+    regime: (r.regime as string) ?? undefined,
     priceAtAlert: (r.price_at_alert as number) ?? undefined,
     price5m: (r.price_5m as number) ?? undefined,
     price15m: (r.price_15m as number) ?? undefined,
