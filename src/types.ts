@@ -71,6 +71,9 @@ export interface MarketSnapshot {
   /** Bonding-curve fill toward graduation (~$69k → PumpSwap). 0..1. */
   bondingCurveProgress?: number;
   volume?: { m5?: number; h1?: number; h24?: number };
+  /** Aggregate buy/sell counts per window (DexScreener) — a FREE trade-flow proxy. */
+  txns?: { m5?: { buys?: number; sells?: number }; h1?: { buys?: number; sells?: number } };
+  priceChange?: { m5?: number; h1?: number };
   at: number;
 }
 

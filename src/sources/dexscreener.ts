@@ -12,6 +12,7 @@ interface DexPair {
   marketCap?: number;
   volume?: { m5?: number; h1?: number; h24?: number };
   priceChange?: { m5?: number; h1?: number };
+  txns?: { m5?: { buys?: number; sells?: number }; h1?: { buys?: number; sells?: number } };
 }
 
 export async function fetchDexSnapshot(mint: string, timeoutMs = 6000): Promise<MarketSnapshot | undefined> {
@@ -29,6 +30,8 @@ export async function fetchDexSnapshot(mint: string, timeoutMs = 6000): Promise<
       liquidityUsd: pair.liquidity?.usd,
       marketCapUsd: pair.fdv ?? pair.marketCap,
       volume: { m5: pair.volume?.m5, h1: pair.volume?.h1, h24: pair.volume?.h24 },
+      txns: pair.txns,
+      priceChange: { m5: pair.priceChange?.m5, h1: pair.priceChange?.h1 },
       at: Date.now(),
     };
   } catch {

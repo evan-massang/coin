@@ -1,7 +1,8 @@
 import type { Connection } from "@solana/web3.js";
 import type { Services } from "../services.js";
 import type { PumpPortalClient } from "../sources/pumpPortal.js";
-import type { NewToken, Decision, SafetyResult, ScoreBreakdown, TradeEvent, HypeResult, GraphIntel } from "../types.js";
+import type { NewToken, Decision, SafetyResult, ScoreBreakdown, TradeEvent, HypeResult, GraphIntel, MarketSnapshot } from "../types.js";
+import { dexSignals } from "./dexMomentum.js";
 import { emptyScores } from "../types.js";
 import { SeenCache } from "../util/seenCache.js";
 import { RateLimiter } from "../util/rateLimiter.js";
@@ -9,6 +10,7 @@ import { metrics } from "../util/metrics.js";
 import { withTimeout } from "../util/withTimeout.js";
 import { log } from "../util/logger.js";
 import { TokenStateMachine, type TrackedToken } from "./stateMachine.js";
+import { pickWatchVictim, type WatchSlot } from "./watchAllocator.js";
 import { evaluateStage0, evaluateStage1, type Stage0Inputs } from "./safetyGate.js";
 import { lateEntryRisk } from "../scoring/lateEntry.js";
 import { analyzeBundle } from "../checks/bundleInsider.js";
@@ -114,11 +116,8 @@ export class EntryPipeline {
     for (const mint of this.buffers.keys()) {
       if (!this.sm.has(mint)) this.buffers.delete(mint);
     }
-    for (const mint of this.watched) {
-      if (!this.sm.has(mint)) {
-        this.watched.delete(mint);
-        this.pump.unwatchToken(mint);
-      }
+    for (const mint of [...this.watched]) {
+      if (!this.sm.has(mint)) this.unwatch(mint);
     }
   }
 
@@ -180,11 +179,39 @@ export class EntryPipeline {
     }
     this.buffers.set(token.mint, seed);
     metrics.inc("survivors");
-    // Only subscribe to the live trade stream if under the cap.
-    if (this.watched.size < this.maxWatched) {
-      this.watched.add(token.mint);
-      this.pump.watchToken(token.mint);
+    this.admitToWatch(token.mint, now);
+  }
+
+  private watch(mint: string): void {
+    if (this.watched.has(mint)) return;
+    this.watched.add(mint);
+    this.pump.watchToken(mint);
+  }
+
+  private unwatch(mint: string): void {
+    if (this.watched.delete(mint)) this.pump.unwatchToken(mint);
+  }
+
+  /**
+   * Give this survivor a live trade-stream slot. If the cap is full and recycling
+   * is enabled, EVICT the deadest eligible slot (fewest trades, past min-tenure,
+   * still below the sufficiency threshold so an active token is never evicted) so
+   * the fresh survivor can actually accumulate enough trades to earn a verdict.
+   * Demand-driven + bounded to maxWatched ⇒ feed-safe. (Cycle 3.)
+   */
+  private admitToWatch(mint: string, now: number): void {
+    if (this.watched.has(mint)) return;
+    if (this.watched.size < this.maxWatched) { this.watch(mint); return; }
+    if (!this.svc.settings.get("adaptiveWatchEnabled")) return; // legacy: no slot, scores on seed
+    const slots: WatchSlot[] = [];
+    for (const w of this.watched) {
+      const tracked = this.sm.get(w);
+      if (!tracked) continue;
+      const buf = this.buffers.get(w) ?? [];
+      slots.push({ mint: w, age: now - tracked.firstSeenAt, trades: buf.length, lastTradeAt: buf.length ? buf[buf.length - 1]!.at : tracked.firstSeenAt });
     }
+    const victim = pickWatchVictim(slots, this.minObserveMs, this.minTradesToScore);
+    if (victim) { this.unwatch(victim); this.watch(mint); metrics.inc("watch_recycled"); }
   }
 
   /** Periodic scoring of OBSERVING survivors. */
@@ -251,10 +278,22 @@ export class EntryPipeline {
       pullbackSeen: detectPullback(mcaps),
     });
 
+    // Cycle 4: the PumpPortal per-trade stream is a PAID feature the engine doesn't
+    // buy (0.01 SOL/10k events), so the trade buffer is empty and organic/momentum
+    // are blind. Derive them for FREE from DexScreener's rolling 5m buy/sell + price
+    // aggregates — and because that window is DexScreener's own, observing longer
+    // does NOT deflate it (unlike now−start trade-stream momentum).
+    let dexSnap: MarketSnapshot | undefined;
+    if (s.dexFallbackEnabled && this.dexLimiter.tryAcquire()) {
+      dexSnap = await fetchDexSnapshot(token.mint).catch(() => undefined);
+      if (dexSnap) this.svc.tokens.saveSnapshot(dexSnap);
+    }
+    const dex = dexSignals(dexSnap, s.minBuysToDecide);
+
     const scores: ScoreBreakdown = {
       safety: stage1.score,
-      organic: scoreOf(results, "organic"),
-      momentum: scoreOf(results, "momentum"),
+      organic: dex.confident ? dex.organic : scoreOf(results, "organic"),
+      momentum: dex.confident ? dex.momentum : scoreOf(results, "momentum"),
       graduation: scoreOf(results, "graduation"),
       devReputation: scoreOf(results, "devReputation"),
       smartMoney: scoreOf(results, "smartMoney"),
@@ -279,9 +318,10 @@ export class EntryPipeline {
     // conviction blend rather than anchoring it at a frozen default (Cycle 1 fix).
     const conf = (id: string): number => { const r = results.get(id); return r?.unknown ? 0 : (r?.confidence ?? 1); };
     const confidence = {
-      organic: conf("organic"), momentum: conf("momentum"), graduation: conf("graduation"),
+      organic: dex.confident ? 0.9 : conf("organic"), momentum: dex.confident ? 0.9 : conf("momentum"), graduation: conf("graduation"),
       devReputation: conf("devReputation"), smartMoney: conf("smartMoney"), social: conf("social"), hype: conf("hype"),
     };
+    if (dex.confident) reasons.unshift(`dex: ${dex.txns5m} txns/5m, buy-pressure organic ${dex.organic}`);
 
     const decision = decide({
       mint: token.mint,
@@ -391,14 +431,14 @@ export class EntryPipeline {
     tracked.lastDecision = decision;
     metrics.inc(`scored_${decision.verdict}`);
 
-    const priceUsd = await this.priceFor(token.mint);
+    const priceUsd = dexSnap?.priceUsd ?? (await this.priceFor(token.mint));
     this.svc.dispatcher.dispatch(decision, { priceAtAlert: priceUsd });
     this.hooks.onDecision?.(decision, tracked);
 
     // Resource bound: stop metered trade stream for non-BUY outcomes (freeing a
     // subscription slot). BUY survivors stay subscribed for the exit engine.
     if (decision.verdict !== "BUY_SMALL" && decision.verdict !== "BUY_STRONG") {
-      if (this.watched.delete(token.mint)) this.pump.unwatchToken(token.mint);
+      this.unwatch(token.mint);
     }
   }
 

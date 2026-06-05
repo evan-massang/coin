@@ -60,7 +60,11 @@ export function computeRisk(ctx: RiskContext): RiskDecision {
   const product =
     m.safety * m.liquidity * m.organic * m.momentum * m.marketWeather * m.sourceAgreement * m.volatility * m.timeDecay * scamMemory;
   const suggestedRiskPct = clamp(ctx.baseRiskPct * product, 0, ctx.maxRiskPct);
-  const finalPct = suggestedRiskPct < ctx.minRiskPct ? 0 : suggestedRiskPct;
+  // A BUY already cleared the safety gate + the conviction gate, so it should take
+  // at least the minimum (paper) size — never round to zero — otherwise valid BUYs
+  // can't execute and we can't measure whether they're profitable. Conservative
+  // multipliers still shrink it toward this floor.
+  const finalPct = Math.max(suggestedRiskPct, ctx.minRiskPct);
   const riskTier = tierFor(finalPct);
   reasons.unshift(`${riskTier} — ${finalPct.toFixed(2)}% (base ${ctx.baseRiskPct}% × ${product.toFixed(2)})`);
 

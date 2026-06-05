@@ -57,6 +57,13 @@ export const SettingsSchema = z.object({
   minConvictionBuySmall: z.number().min(0).max(100).default(55),
   minConvictionBuyStrong: z.number().min(0).max(100).default(72),
 
+  // ── Observation coverage (Cycle 3 — recycle watch slots toward active tokens) ──
+  /** Demand-driven watch-slot recycling: evict dead slots to watch fresh survivors. */
+  adaptiveWatchEnabled: z.boolean().default(true),
+  /** Cycle 4: derive organic/momentum from DexScreener aggregates (FREE) since the
+   *  PumpPortal per-trade stream is a paid feature. The real trade-flow source. */
+  dexFallbackEnabled: z.boolean().default(true),
+
   // ── Evidence sufficiency (Cycle 1 fix — NOT auto-tunable; structural safety) ──
   /** Min observed trades before organic/momentum carry confidence. Floored at 8. */
   minBuysToDecide: z.number().int().min(8).max(50).default(8),
