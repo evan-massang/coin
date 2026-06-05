@@ -69,7 +69,7 @@ async function loadAll() {
   ]);
   STATE.status = status; STATE.market = market; STATE.engine = engine; STATE.council = council; STATE.councilStats = councilStats;
   STATE.signals = (signals || []).map((s) => ({ ...s, verdict: s.verdict })).reverse();
-  renderEngineState(); renderRegime(); renderCouncil(); renderTable(); renderAlerts();
+  renderEngineState(); renderRegime(); renderCouncil(); renderTable(); renderAlerts(); renderPaper();
   // Default selection = highest-conviction recent token.
   if (!STATE.selectedMint && STATE.signals.length) selectToken((topSignal() || STATE.signals[STATE.signals.length - 1]).mint);
   else if (STATE.selectedMint) refreshSelected();
@@ -87,7 +87,7 @@ function renderEngineState() {
   const buys = STATE.signals.filter((s) => isBuy(s.verdict)).length;
   if (buys === 0 && STATE.signals.length >= 40) {
     note.style.display = "block";
-    note.innerHTML = `⚠ No BUY signals — most tokens are scored before reaching ~8 observed trades, so conviction is honestly capped to WATCH (<b>low-coverage</b>), not faked. The paper/council panels are idle for that reason — an observation-depth limit, not a UI fault. See docs/research/cycle-02.md.`;
+    note.innerHTML = `⚠ No BUY signals — most tokens are scored before reaching ~8 observed trades, so conviction is honestly capped to WATCH (<b>low-coverage</b>), not faked. The Paper Wallet below fills only when a BUY clears the gate — an observation-depth limit, not a UI fault. See docs/research/cycle-02.md.`;
   } else note.style.display = "none";
 }
 
@@ -376,6 +376,61 @@ function onGraphClick(ev) {
   $("#graph-focus").innerHTML = `<b style="color:${ET[e.type] || COL.muted}">${esc(e.label)}</b> · ${esc(e.sub || "")} — ${esc(ENT_DESC[e.type] || "")}`;
 }
 
+// ── paper wallet (Mode 3 — simulated execution; never holds a key, never signs) ──
+function paperPosRow(p) {
+  const mult = p.entryPriceUsd > 0 && p.lastPriceUsd ? p.lastPriceUsd / p.entryPriceUsd : 1;
+  const pnlPct = (mult - 1) * 100;
+  return `<tr>
+    <td><b>$${esc(p.symbol || p.mint.slice(0, 5))}</b></td>
+    <td class="muted">${ageStr(p.entryAtMs)}</td>
+    <td>${(p.solInvested ?? 0).toFixed(3)}</td>
+    <td>${mult.toFixed(2)}x</td>
+    <td><span class="${pnlPct >= 0 ? "green" : "red"}">${pctS(pnlPct)}</span></td>
+    <td><span class="statepill">${esc(p.status || "OPEN")}</span></td>
+  </tr>`;
+}
+function paperCloseRow(p) {
+  const realized = p.realizedPnlUsd ?? 0, win = realized > 0;
+  const peak = p.entryPriceUsd > 0 && p.peakPriceUsd ? p.peakPriceUsd / p.entryPriceUsd : 1;
+  return `<tr>
+    <td><b>$${esc(p.symbol || p.mint.slice(0, 5))}</b></td>
+    <td><span class="${win ? "green" : "red"}">${win ? "WIN" : "LOSS"}</span></td>
+    <td class="${win ? "green" : "red"}">${win ? "+" : ""}$${realized.toFixed(2)}</td>
+    <td class="muted">${peak.toFixed(2)}x</td>
+  </tr>`;
+}
+async function renderPaper() {
+  const p = await api("/paper").catch(() => null);
+  if (!p) return;
+  const off = $("#pw-off"), body = $("#pw-body");
+  if (!off || !body) return;
+  if (!p.enabled) {
+    $("#pw-status").innerHTML = `<span class="red">OFF</span>`;
+    off.style.display = "block";
+    off.innerHTML = `⚠ Paper trading is <b>OFF</b> — that's why nothing fills. Turn it on in <b>⚙ CONFIG → paper trading</b> and Save. The engine then simulates fills on BUY signals — it never holds a key or signs.`;
+    body.style.display = "none";
+    return;
+  }
+  off.style.display = "none"; body.style.display = "block";
+  const st = p.stats || {}, w = p.wallet || {};
+  const bal = st.balanceSol ?? w.balanceSol ?? 0;
+  $("#pw-status").innerHTML = `<span class="green">● ACTIVE</span>`;
+  $("#pw-bal").innerHTML = `${bal.toFixed(3)} <span class="muted small">/ ${p.startingBalanceSol || 0}</span>`;
+  const pnl = st.totalPnlSol ?? 0;
+  $("#pw-pnl").innerHTML = `<span class="${pnl >= 0 ? "green" : "red"}">${pnl >= 0 ? "+" : ""}${pnl.toFixed(3)}</span> <span class="muted small">SOL</span>`;
+  $("#pw-win").textContent = `${Math.round((st.winRate ?? 0) * 100)}%`;
+  $("#pw-open").textContent = st.openCount ?? (p.open || []).length;
+  $("#pw-closed").textContent = st.closedCount ?? (p.closed || []).length;
+  const open = (p.open || []).slice().sort((a, b) => b.entryAtMs - a.entryAtMs);
+  $("#pw-positions").innerHTML = open.length
+    ? open.map(paperPosRow).join("")
+    : `<tr><td colspan="6" class="muted small">no open positions — fills appear here when a BUY signal clears the gate</td></tr>`;
+  const closed = (p.closed || []).slice(-10).reverse();
+  $("#pw-closes").innerHTML = closed.length
+    ? closed.map(paperCloseRow).join("")
+    : `<tr><td colspan="4" class="muted small">no closed trades yet</td></tr>`;
+}
+
 // ── ticker ──
 function renderAlerts() {
   const recent = STATE.signals.slice(-8).reverse();
@@ -461,6 +516,7 @@ $("#close-config").onclick = () => $("#config").classList.remove("open");
 $("#open-room").onclick = openCouncilRoom;
 $("#close-room").onclick = () => $("#room").classList.remove("open");
 $("#run-debate").onclick = runDebate;
+$("#pw-reset").onclick = async () => { if (!confirm("Reset the paper wallet to its starting balance? This clears all simulated positions.")) return; await api("/paper/reset", { method: "POST" }); renderPaper(); };
 $("#aiform").onsubmit = async (e) => { e.preventDefault(); const mint = e.target.mint.value.trim(); $("#ai-out").textContent = "queued…"; const r = await api("/ai-computer/task", { method: "POST", body: { mint } }); $("#ai-out").textContent = r.ok ? `running ${r.taskId} — the Council Room updates shortly` : `error: ${r.error}`; };
 
 (async function boot() {

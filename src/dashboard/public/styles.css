@@ -139,6 +139,13 @@ a { color: var(--green-2); text-decoration: none; cursor: pointer; }
 .consensus-bar i { display: block; height: 100%; }
 .consensus-shared { font-size: 13px; color: var(--muted); margin-top: 6px; }
 
+/* ── paper wallet (Mode 3 — simulated execution) ── */
+.papergrid { margin-bottom: 12px; }
+.paper-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 4px; }
+.paper-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.paper-cols .feed td, .paper-cols .feed th { padding: 5px 6px; }
+.paper-cols .feed tr { cursor: default; }
+
 /* ── evidence / conflict / timeline row ── */
 .botgrid { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
 .ev-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

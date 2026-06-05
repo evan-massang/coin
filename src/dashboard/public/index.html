@@ -100,6 +100,33 @@
         </div>
       </section>
 
+      <!-- ── PAPER WALLET — simulated execution (Mode 3; never holds a key, never signs) ── -->
+      <section class="papergrid">
+        <div class="panel">
+          <div class="panel-head"><span class="tag">💵 PAPER WALLET</span><h2>simulated execution · <span id="pw-status" class="muted">—</span></h2><a class="cfg" id="pw-reset" style="margin-left:auto">↺ RESET</a></div>
+          <div id="pw-off" class="idle-note" style="display:none"></div>
+          <div id="pw-body">
+            <div class="paper-stats">
+              <div class="obs-cell"><div class="s-k">BALANCE (SOL)</div><div class="s-v" id="pw-bal">—</div></div>
+              <div class="obs-cell"><div class="s-k">TOTAL PNL</div><div class="s-v" id="pw-pnl">—</div></div>
+              <div class="obs-cell"><div class="s-k">WIN RATE</div><div class="s-v" id="pw-win">—</div></div>
+              <div class="obs-cell"><div class="s-k">OPEN</div><div class="s-v" id="pw-open">—</div></div>
+              <div class="obs-cell"><div class="s-k">CLOSED</div><div class="s-v" id="pw-closed">—</div></div>
+            </div>
+            <div class="paper-cols">
+              <div>
+                <div class="sec-label">OPEN POSITIONS</div>
+                <table class="feed"><thead><tr><th>TOKEN</th><th>AGE</th><th>SIZE</th><th>NOW</th><th>PNL</th><th>STATUS</th></tr></thead><tbody id="pw-positions"></tbody></table>
+              </div>
+              <div>
+                <div class="sec-label">RECENT CLOSES</div>
+                <table class="feed"><thead><tr><th>TOKEN</th><th>RESULT</th><th>PNL (USD)</th><th>PEAK</th></tr></thead><tbody id="pw-closes"></tbody></table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ── evidence row: the "why believe / why doubt" ── -->
       <section class="botgrid">
         <div class="panel">
