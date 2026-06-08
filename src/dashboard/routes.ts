@@ -8,6 +8,7 @@ import { classifyRegime } from "../graph/marketRegime.js";
 import { buildReasoningFeed, buildReasoningReport } from "./reasoning.js";
 import { computePaperStats } from "../paper/paperPnL.js";
 import { validateDataTruth } from "../debug/dataTruthValidator.js";
+import { auditAuthority, type AuthorityResearch } from "../debug/authorityAudit.js";
 
 /** Core read API: status, journal/signals, positions, tokens. */
 export function coreRoutes(svc: Services): Router {
@@ -67,6 +68,34 @@ export function coreRoutes(svc: Services): Router {
       signals,
       attentionFeedCount: svc.attention?.recent(120).length ?? 0,
       attentionDbCount: svc.attentionRepo.count(),
+    });
+    res.json({ at: Date.now(), ...report });
+  });
+
+  // Phase 17/22 Decision Authority: per executed paper buy, which intelligence backed
+  // it; plus THE invariant — when the Readiness Gate is on, no buy bypasses attention
+  // (the legacy pre-research scored_BUY_* counter must be 0). Proves Athena gates buys.
+  r.get("/authority", (_req, res) => {
+    const s = svc.settings.all();
+    const gateOn = s.attentionReadinessGate && s.attentionEnabled && s.weightAttention > 0;
+    const positions = [...svc.paperPositions.byStatus(true), ...svc.paperPositions.byStatus(false)]
+      .sort((a, b) => b.entryAtMs - a.entryAtMs)
+      .slice(0, 60);
+    const buys = positions.map((p) => ({ mint: p.mint, symbol: p.symbol, entryAtMs: p.entryAtMs }));
+    const research = new Map<string, AuthorityResearch>();
+    for (const b of buys) {
+      const rec = svc.attentionRepo.get(b.mint);
+      if (rec) research.set(b.mint, { at: rec.at, attention: rec.scores.attention, confidence: rec.scores.confidence });
+    }
+    const counters = metrics.snapshot().counters;
+    const report = auditAuthority({
+      gateOn,
+      buys,
+      research,
+      counters: {
+        scoredBuys: (counters.scored_BUY_SMALL ?? 0) + (counters.scored_BUY_STRONG ?? 0),
+        attentionGatedBuys: counters.attention_gated_buy ?? 0,
+      },
     });
     res.json({ at: Date.now(), ...report });
   });
