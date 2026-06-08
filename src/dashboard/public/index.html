@@ -63,9 +63,9 @@
             <div class="panel-head"><span class="tag">◉ OBSERVATION</span><h2>status · <span id="obs-token" class="muted">—</span></h2></div>
             <div class="obs-grid">
               <div class="obs-cell"><div class="s-k">STATE</div><div class="obs-state" id="obs-state">—</div></div>
-              <div class="obs-cell"><div class="s-k">CONFIDENCE</div><div class="s-v" id="obs-conf">—</div></div>
-              <div class="obs-cell"><div class="s-k">AGE</div><div class="s-v" id="obs-age">—</div></div>
-              <div class="obs-cell"><div class="s-k">CONVICTION</div><div class="s-v" id="obs-tier">—</div></div>
+              <div class="obs-cell"><div class="s-k" title="conviction score 0-100 (a weighted blend, NOT a probability)">CONVICTION</div><div class="s-v" id="obs-conf">—</div></div>
+              <div class="obs-cell"><div class="s-k" title="how long THIS engine has observed the token (watch time), not coin age">OBSERVED</div><div class="s-v" id="obs-age">—</div></div>
+              <div class="obs-cell"><div class="s-k" title="conviction tier: HIGH >=72, MEDIUM >=50, else LOW">TIER</div><div class="s-v" id="obs-tier">—</div></div>
             </div>
             <div class="sec-label">DATA COVERAGE</div>
             <div class="cover-bar"><i id="obs-cover-i"></i></div>

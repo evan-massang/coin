@@ -266,7 +266,8 @@ function renderSelected() {
   const stEl = $("#obs-state");
   stEl.textContent = i && i.state ? i.state.replace("_", " ") : "—";
   stEl.className = "obs-state " + (i && i.state ? "st-" + i.state : "");
-  $("#obs-conf").textContent = i && i.confidence != null ? i.confidence + "%" : "—";
+  // i.confidence is the conviction SCORE (0-100 blend), not a probability — no "%".
+  $("#obs-conf").textContent = i && i.confidence != null ? String(i.confidence) : "—";
   $("#obs-age").textContent = i ? ageMs(i.observationAgeMs || 0) : "—";
   $("#obs-tier").innerHTML = i && i.convictionTier ? `<span style="color:${i.convictionTier === "HIGH" ? COL.green : i.convictionTier === "MEDIUM" ? COL.gold : COL.muted}">${i.convictionTier}</span>` : "—";
   const cov = i && i.coverage != null ? i.coverage : 0;
