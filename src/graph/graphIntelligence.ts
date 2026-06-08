@@ -23,6 +23,9 @@ export interface GraphIntelInput {
   similarWinners?: number;
   deployerLaunches?: number;
   liquidityUsd?: number;
+  /** The operator's configured min liquidity (safety gate). The bull/bear chip uses
+   *  THIS, not a hardcoded literal, so the chip and the safety gate never disagree. */
+  minLiquidityUsd?: number;
   tradeCount: number;
   firstSeenAt: number;
   now: number;
@@ -75,7 +78,8 @@ function buildEvidence(i: GraphIntelInput): { bull: EvidenceItem[]; bear: Eviden
   if (s.momentum >= 60) bull.push({ label: "Buyer velocity rising", weight: 12 });
   if (s.smartMoney >= 55) bull.push({ label: "Smart wallet cluster entered", weight: 14 });
   if (s.graduation >= 50) bull.push({ label: "Bonding curve filling", weight: 8 });
-  if (i.liquidityUsd !== undefined && i.liquidityUsd >= 3000) bull.push({ label: "Liquidity holding", weight: 8 });
+  const minLiq = i.minLiquidityUsd ?? 3000;
+  if (i.liquidityUsd !== undefined && i.liquidityUsd >= minLiq) bull.push({ label: "Liquidity holding", weight: 8 });
   if (s.hype >= 60) bull.push({ label: "Strong narrative", weight: 8 });
   if ((i.similarWinners ?? 0) > 0) bull.push({ label: `Similar to ${i.similarWinners} historical winner(s)`, weight: 10 });
   if (i.safety.pass && !i.rugMatch && !i.bundle) bull.push({ label: "No rug pattern detected", weight: 6 });
@@ -85,7 +89,7 @@ function buildEvidence(i: GraphIntelInput): { bull: EvidenceItem[]; bear: Eviden
   if (i.rugMatch) bear.push({ label: "Matches a known rug", weight: 20 });
   if (s.organic < 45) bear.push({ label: "Wash / low organic volume", weight: 14 });
   if (s.lateEntryRisk >= 50) bear.push({ label: "Late entry — price already ran", weight: 10 });
-  if (i.liquidityUsd !== undefined && i.liquidityUsd < 3000) bear.push({ label: "Thin liquidity", weight: 8 });
+  if (i.liquidityUsd !== undefined && i.liquidityUsd < minLiq) bear.push({ label: "Thin liquidity", weight: 8 });
   if (s.hype < 40) bear.push({ label: "Weak narrative", weight: 5 });
   if (i.safety.unknownCount >= 2) bear.push({ label: "Unverified data", weight: 6 });
   if ((i.deployerLaunches ?? 0) <= 1 && i.creator) bear.push({ label: "New deployer (no history)", weight: 4 });

@@ -527,6 +527,7 @@ export class EntryPipeline {
       similarWinners: this.svc.fingerprints.similarWinners(fp.normName),
       deployerLaunches: token.creator ? this.svc.creatorHistory.get(token.creator)?.launches : undefined,
       liquidityUsd: tracked.rugcheck?.totalLiquidityUsd,
+      minLiquidityUsd: s.minLiquidityUsd,
       tradeCount: trades.length,
       firstSeenAt: tracked.firstSeenAt,
       now,

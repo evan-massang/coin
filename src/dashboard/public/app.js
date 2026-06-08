@@ -302,8 +302,16 @@ function renderSelected() {
   $("#cf-bear-n").textContent = `${bear.length} ▼`;
   const net = bs - br;
   $("#cf-net").textContent = tot ? (net > 0 ? "BULL LEAN" : net < 0 ? "BEAR LEAN" : "SPLIT") : "—";
+  // The lean is a raw heuristic tally, separate from the gated verdict. NEVER claim
+  // "supports a position" when the engine's actual verdict isn't a BUY — the safety
+  // gate / conviction caps can (and do) override a bullish lean, and showing the two
+  // in contradiction would push the operator to fight the engine's own decision.
+  const isBuyV = verdict === "BUY_SMALL" || verdict === "BUY_STRONG";
+  const lean = net > 8
+    ? (isBuyV ? "evidence supports a position" : `bullish lean — but verdict is ${verdict} (gates/caps overrode)`)
+    : net < -8 ? "evidence says stay away" : "conflicted — not enough edge";
   $("#cf-verdict").innerHTML = tot
-    ? `weighted <b style="color:${net >= 0 ? COL.green : COL.red}">${net >= 0 ? "+" : ""}${net}</b> — ${net > 8 ? "evidence supports a position" : net < -8 ? "evidence says stay away" : "conflicted — not enough edge"}`
+    ? `weighted <b style="color:${net >= 0 ? COL.green : COL.red}">${net >= 0 ? "+" : ""}${net}</b> — ${lean}`
     : (i && i._minimal ? "detail evicted — summary only" : "no token selected");
 
   // observation timeline
