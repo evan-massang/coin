@@ -116,13 +116,17 @@ function gather(svc: Services, limit: number): Gathered {
   const attention: ReasoningItem[] = [];
   for (const r of svc.attention?.recent(30) ?? []) {
     const s = r.scores;
+    // Round ONCE and use it for both the number and the colour, so the displayed value
+    // and its tone can't disagree at a boundary (e.g. 59.6 shown as "60" but coloured
+    // as if < 60). Data-truth audit, attention colour-boundary finding.
+    const a = Math.round(s.attention);
     attention.push({
       kind: "attention",
       at: r.at,
       mint: r.mint,
       symbol: r.evidence.symbol || symOf(r.mint),
-      headline: `attention ${Math.round(s.attention)} · H${Math.round(s.humanity)} V${Math.round(s.virality)} OC${Math.round(s.outsideCrypto)} C${Math.round(s.culturalStrength)} (${r.source})`,
-      tone: s.attention >= 60 ? "bull" : s.attention <= 35 ? "bear" : "neutral",
+      headline: `attention ${a} · H${Math.round(s.humanity)} V${Math.round(s.virality)} OC${Math.round(s.outsideCrypto)} C${Math.round(s.culturalStrength)} (${r.source})`,
+      tone: a >= 60 ? "bull" : a <= 35 ? "bear" : "neutral",
       lines: [s.narrative, ...s.reasons.slice(0, 3), `evidence: ${r.evidence.posts.length} posts · ${r.evidence.platforms.join(", ") || "none"}`],
     });
   }
