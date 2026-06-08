@@ -12,6 +12,7 @@ import { detectAlphaExit } from "./engine/copyTracker.js";
 import { PaperTrader } from "./paper/paperExecution.js";
 import { OutcomeTracker } from "./learning/featureStore.js";
 import { AdaptiveThresholdEngine } from "./learning/adaptiveThresholds.js";
+import { runAthenaAudit } from "./debug/athenaAudit.js";
 import { log } from "./util/logger.js";
 
 // Entry point. Phase 1 brings up the dashboard + store + alert plumbing. Later
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
   let paperExits: ExitEngine | undefined;
   let outcomes: OutcomeTracker | undefined;
   let learning: AdaptiveThresholdEngine | undefined;
+  let auditTimer: NodeJS.Timeout | undefined;
   if (process.env.NO_ENGINE !== "1") {
     // Paper trader (Mode 3). Reacts to BUY signals; its sells run through the
     // same exit engine. Pure simulation — never keys, never signing, never chain.
@@ -121,6 +123,23 @@ async function main(): Promise<void> {
     // (rotating, one at a time) — no manual trigger. Advisory only; never
     // overrides safety, risk, or the verdict. No-op until seats are enabled.
     svc.aiComputer.startAutoDebate();
+
+    // Phase 15 — periodic Athena self-audit. Rolls up the data-truth provenance
+    // checks + the decision-authority bypass invariant and logs a one-line verdict
+    // every 5 min, so an unattended overnight run is grep-able: WARN surfaces benign
+    // drift (e.g. the per-fill ledger), FAIL means an accounting identity broke or a
+    // buy bypassed the attention gate. Read-only.
+    auditTimer = setInterval(() => {
+      try {
+        const a = runAthenaAudit(svc, Date.now());
+        const msg = `athena-audit: ${a.status} (${a.warnings.length} warn, ${a.failures.length} fail)`;
+        if (a.status === "FAIL") log.err(`${msg} — ${a.failures.join(" | ")}`);
+        else if (a.status === "WARN") log.warn(`${msg} — ${a.warnings.join(" | ")}`);
+        else log.info(msg);
+      } catch (e) {
+        log.warn(`athena-audit failed: ${(e as Error).message}`);
+      }
+    }, 5 * 60_000);
   } else {
     log.warn("NO_ENGINE=1 — scanner disabled, dashboard only");
   }
@@ -143,6 +162,7 @@ async function main(): Promise<void> {
       paperExits?.stop();
       outcomes?.stop();
       learning?.stop();
+      if (auditTimer) clearInterval(auditTimer);
       svc.aiComputer.stopAutoDebate();
       svc.aiComputer.shutdownOpencode();
       await close();

@@ -9,6 +9,7 @@ import { buildReasoningFeed, buildReasoningReport } from "./reasoning.js";
 import { computePaperStats } from "../paper/paperPnL.js";
 import { validateDataTruth } from "../debug/dataTruthValidator.js";
 import { auditAuthority, type AuthorityResearch } from "../debug/authorityAudit.js";
+import { runAthenaAudit } from "../debug/athenaAudit.js";
 
 /** Core read API: status, journal/signals, positions, tokens. */
 export function coreRoutes(svc: Services): Router {
@@ -70,6 +71,12 @@ export function coreRoutes(svc: Services): Router {
       attentionDbCount: svc.attentionRepo.count(),
     });
     res.json({ at: Date.now(), ...report });
+  });
+
+  // Phase 15 — one automated audit rolling up data-truth + authority into a single
+  // PASS/WARN/FAIL verdict (the same report logged periodically by the engine).
+  r.get("/athena-audit", (_req, res) => {
+    res.json(runAthenaAudit(svc, Date.now()));
   });
 
   // Phase 17/22 Decision Authority: per executed paper buy, which intelligence backed
