@@ -25,16 +25,22 @@ final build (dashboard at http://127.0.0.1:3000).
 - **Phase 10–13 Explainability** — attention research surfaces in the dashboard
   reasoning feed (👁) with the humanity/virality/outside-crypto/culture breakdown,
   narrative, top reasons, and evidence count.
+- **Phase 19 Meme graveyard / persistence** — `attention_research` table (migration
+  v10) + `AttentionRepo`; research is upserted on completion and the in-memory cache
+  warms from it on boot, so attention now SURVIVES RESTARTS and accrues history.
+- **Phase 15 Evidence explorer (API)** — `GET /attention` (the graveyard) +
+  `GET /attention/:mint` (full evidence for a coin) make every score inspectable.
 
 **Live verification:** engine auto-researched real coins — `$WORLDCUPLIFE` (attn 77),
 `$Teletubby` (outside-crypto 69 — real-world meme correctly detected), `$GLITCH`
 (attn 79, conf 70%). Confidence-gating confirmed working.
 
 ## 🟡 PARTIAL
-- **Phase 15 Evidence explorer** — the feed shows evidence count + reasons + the
-  breakdown, but there's no click-through "inspect every scraped post" UI yet.
-- **Phase 16 Multi-pass** — single pass + TTL re-research is in; the staged
-  deep-dive / recheck / exit-validation passes are not separated out yet.
+- **Phase 15 Evidence explorer UI** — the API (`/attention`, `/attention/:mint`) is
+  done and the feed shows the breakdown; a dedicated click-through dashboard PANEL
+  is not built yet (inspect via the JSON routes for now).
+- **Phase 16 Multi-pass** — single pass + TTL re-research (recheck) is in; staged
+  depth-escalation (deep browser pass for high-conviction) / exit-validation not yet.
 - **Humanity on FRESH coins** — News/Wikipedia give strong real-world/virality
   signal but weak grassroots-human signal for brand-new coins (Reddit/Twitter are
   blocked for raw fetch here; the browser path is flaky behind the cert-inspection
@@ -43,8 +49,9 @@ final build (dashboard at http://127.0.0.1:3000).
 ## ❌ NOT DONE (deliberately deferred — honest)
 - **Phase 14 Live browser monitoring** ("watch the AI browse") — we run headless
   News+Wiki by default; no live-browser viewport in the dashboard.
-- **Phase 19 Meme graveyard** (historical memory of every researched coin for
-  cross-comparison) — not started.
+- **Phase 19 outcome-linking** — the graveyard now persists every researched coin
+  (done), but it doesn't yet JOIN to realized trade outcomes for "what did high-
+  attention coins actually do" learning. The data is captured for that next.
 - **UI-TARS-desktop** — separate from this; not installed (no capable GPU, needs a
   paid cloud model — see the prior plan).
 
