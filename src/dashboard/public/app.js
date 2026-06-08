@@ -44,6 +44,15 @@ function fit(cv, cssH) {
 }
 function ageMs(ms) { const s = Math.floor(ms / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`; }
 function ageStr(at) { return ageMs(Date.now() - at); }
+// AGE column (data-truth fix): show the coin's TRUE age from on-chain pair creation
+// when DexScreener provided it; otherwise show signal recency, clearly marked with a
+// leading ~ + tooltip so it is NEVER read as coin age. Coin age is a primary risk gate.
+function ageCell(s) {
+  if (typeof s.pairCreatedAt === "number" && s.pairCreatedAt > 0) {
+    return `<span title="coin age — on-chain pair creation (DexScreener)">${ageStr(s.pairCreatedAt)}</span>`;
+  }
+  return `<span class="muted" title="last scored (recency) — true coin age unknown: no DEX pair yet">~${ageStr(s.at)}</span>`;
+}
 
 const topSignal = () => { const b = STATE.signals.filter((s) => isBuy(s.verdict)); return (b.length ? b : STATE.signals).slice().sort((a, z) => z.conviction - a.conviction)[0]; };
 
@@ -205,7 +214,7 @@ function feedRow(s) {
   const sel = s.mint === STATE.selectedMint ? " class=\"sel\"" : "";
   return `<tr${sel} data-mint="${esc(s.mint)}">
     <td><b>$${esc(s.symbol || s.mint.slice(0, 5))}</b></td>
-    <td class="muted">${ageStr(s.at)}</td>
+    <td class="muted">${ageCell(s)}</td>
     <td>${stateChip(s.state)}</td>
     <td>${convChip(s)}</td>
     <td>${evCell(s)}</td>

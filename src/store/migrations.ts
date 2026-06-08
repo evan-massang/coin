@@ -364,6 +364,15 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_attn_score ON attention_research(attention);
     `,
   },
+  {
+    version: 11,
+    up: /* sql */ `
+      -- Data-truth (Phase 0/16): the coin's TRUE on-chain birth time (DexScreener
+      -- pairCreatedAt, Unix ms). Lets the dashboard show real coin AGE instead of
+      -- signal recency. NULL for pre-graduation coins with no DEX pair yet.
+      ALTER TABLE signals ADD COLUMN pair_created_at INTEGER;
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

@@ -36,6 +36,7 @@ export function decisionToAlert(d: Decision): Alert {
     evidenceCount: d.evidenceCount,
     bullCount: d.bullCount,
     bearCount: d.bearCount,
+    pairCreatedAt: d.pairCreatedAt,
     at: d.at,
   };
 }

@@ -65,6 +65,15 @@ describe("SignalsRepo.buyStats", () => {
     repo.insert(decision({ mint: "OPEN", verdict: "BUY_STRONG" })); // no updatePricePath
     expect(repo.buyStats().samples).toBe(0);
   });
+
+  it("round-trips pairCreatedAt (true coin age) — persisted and read back; undefined when absent", () => {
+    const born = 1_700_000_000_000;
+    repo.insert(decision({ mint: "AGED", verdict: "WATCH_ONLY", pairCreatedAt: born }));
+    repo.insert(decision({ mint: "NEWBORN", verdict: "WATCH_ONLY" })); // no DEX pair ⇒ undefined
+    const rows = repo.recent(10);
+    expect(rows.find((r) => r.mint === "AGED")?.pairCreatedAt).toBe(born);
+    expect(rows.find((r) => r.mint === "NEWBORN")?.pairCreatedAt).toBeUndefined();
+  });
 });
 
 describe("SignalsRepo.recentForTracking", () => {

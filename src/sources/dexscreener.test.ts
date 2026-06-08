@@ -40,4 +40,15 @@ describe("snapshotsFromPairs", () => {
     expect(s.txns?.m5?.buys).toBe(7);
     expect(s.priceChange?.m5).toBe(12);
   });
+
+  it("captures pairCreatedAt (the coin's TRUE birth time) and drops bogus 0/negative", () => {
+    const m = snapshotsFromPairs([
+      { baseToken: { address: "AAA" }, priceUsd: "1", pairCreatedAt: 1_700_000_000_000 },
+      { baseToken: { address: "BBB" }, priceUsd: "1", pairCreatedAt: 0 },
+      { baseToken: { address: "CCC" }, priceUsd: "1" }, // absent ⇒ undefined (pre-graduation)
+    ]);
+    expect(m.get("AAA")?.pairCreatedAt).toBe(1_700_000_000_000);
+    expect(m.get("BBB")?.pairCreatedAt).toBeUndefined();
+    expect(m.get("CCC")?.pairCreatedAt).toBeUndefined();
+  });
 });

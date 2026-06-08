@@ -77,6 +77,9 @@ export interface MarketSnapshot {
   /** Aggregate buy/sell counts per window (DexScreener) — a FREE trade-flow proxy. */
   txns?: { m5?: { buys?: number; sells?: number }; h1?: { buys?: number; sells?: number } };
   priceChange?: { m5?: number; h1?: number };
+  /** On-chain pair creation time (Unix ms) from DexScreener — the only free source
+   *  of a coin's TRUE age. Absent for pre-graduation pump.fun coins (no DEX pair yet). */
+  pairCreatedAt?: number;
   at: number;
 }
 
@@ -186,6 +189,9 @@ export interface Decision {
   bearCount?: number;
   /** Market regime active when this decision fired (research enablement). */
   regime?: string;
+  /** On-chain pair-creation time (Unix ms) from DexScreener — the coin's TRUE birth
+   *  time. Age = now - pairCreatedAt. Absent for pre-graduation coins (no DEX pair). */
+  pairCreatedAt?: number;
   at: number;
 }
 
@@ -221,6 +227,8 @@ export interface Alert {
   evidenceCount?: number;
   bullCount?: number;
   bearCount?: number;
+  /** Coin's TRUE birth time (Unix ms) when known — age = now - pairCreatedAt. */
+  pairCreatedAt?: number;
   at: number;
 }
 

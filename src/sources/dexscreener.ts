@@ -14,6 +14,8 @@ interface DexPair {
   priceChange?: { m5?: number; h1?: number };
   txns?: { m5?: { buys?: number; sells?: number }; h1?: { buys?: number; sells?: number } };
   baseToken?: { address?: string };
+  /** Unix ms of on-chain pair creation — the free source of a coin's TRUE age. */
+  pairCreatedAt?: number;
 }
 
 /** Max token addresses DexScreener accepts in one /tokens/ request. */
@@ -28,6 +30,7 @@ function pairToSnapshot(mint: string, pair: DexPair): MarketSnapshot {
     volume: { m5: pair.volume?.m5, h1: pair.volume?.h1, h24: pair.volume?.h24 },
     txns: pair.txns,
     priceChange: { m5: pair.priceChange?.m5, h1: pair.priceChange?.h1 },
+    pairCreatedAt: typeof pair.pairCreatedAt === "number" && pair.pairCreatedAt > 0 ? pair.pairCreatedAt : undefined,
     at: Date.now(),
   };
 }

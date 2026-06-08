@@ -537,6 +537,10 @@ export class EntryPipeline {
     decision.evidenceCount = intel.bull.length + intel.bear.length;
     decision.bullCount = intel.bull.length;
     decision.bearCount = intel.bear.length;
+    // True coin age (Phase 0/16 data-truth fix): DexScreener's pairCreatedAt is the
+    // only free source of a coin's real birth time. When absent (pre-graduation), the
+    // UI honestly falls back to signal recency rather than mislabeling it as age.
+    decision.pairCreatedAt = dexSnap?.pairCreatedAt;
     this.recordIntel(intel);
 
     tracked.lastDecision = decision;
