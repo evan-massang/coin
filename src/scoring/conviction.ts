@@ -21,11 +21,15 @@ export interface ConvictionWeights {
   smartMoney: number;
   social: number;
   hype: number;
+  /** Attention Intelligence (Project Athena). Confidence-gated: only counts when a
+   *  coin has actually been researched (else dropped), so it never affects blind
+   *  newborns. Absent/0 weight ⇒ skipped entirely (legacy/test behaviour preserved). */
+  attention?: number;
 }
 
 export type FacetConfidence = Partial<Record<keyof ConvictionWeights, number>>;
 
-const ALL_FACETS: (keyof ConvictionWeights)[] = ["organic", "momentum", "graduation", "devReputation", "smartMoney", "social", "hype"];
+const ALL_FACETS: (keyof ConvictionWeights)[] = ["organic", "momentum", "graduation", "devReputation", "smartMoney", "social", "hype", "attention"];
 /** "Real" evidence facets — social + hype (narrative anchors) are excluded. */
 export const REAL_FACETS: (keyof ConvictionWeights)[] = ["organic", "momentum", "graduation", "devReputation", "smartMoney"];
 
@@ -42,9 +46,11 @@ export function computeConviction(scores: ScoreBreakdown, w: ConvictionWeights, 
   let sum = 0;
   let keptW = 0;
   for (const f of ALL_FACETS) {
+    const wf = w[f] ?? 0;
+    if (wf <= 0) continue; // facet not weighted (e.g. attention off, or legacy tests)
     if ((confidence[f] ?? 1) < floor) continue; // drop low-confidence facet entirely
-    sum += clamp(scores[f]) * w[f];
-    keptW += w[f];
+    sum += clamp(scores[f] ?? 0) * wf;
+    keptW += wf;
   }
   if (keptW <= 0) return 0;
   return clamp(sum / keptW);
@@ -55,8 +61,9 @@ export function realCoverage(w: ConvictionWeights, confidence: FacetConfidence =
   let total = 0;
   let kept = 0;
   for (const f of REAL_FACETS) {
-    total += w[f];
-    if ((confidence[f] ?? 1) >= floor) kept += w[f];
+    const wf = w[f] ?? 0;
+    total += wf;
+    if ((confidence[f] ?? 1) >= floor) kept += wf;
   }
   return total > 0 ? kept / total : 0;
 }

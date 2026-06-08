@@ -92,6 +92,18 @@ export const SettingsSchema = z.object({
   scanMaxAgeHours: z.number().min(0).default(6),
   scanIntervalSec: z.number().int().min(30).max(1800).default(120),
 
+  // ── Attention Intelligence / autonomous research (Project Athena) ──
+  /** Auto-research shortlisted (WATCH/BUY) coins for attention signals. */
+  attentionEnabled: z.boolean().default(true),
+  /** Local Ollama model for the attention judge (e.g. "qwen2.5:14b" / "gemma2:9b").
+   *  "" = deterministic heuristic agents only (free, no model needed). */
+  attentionLlmModel: z.string().default(""),
+  /** Also try Reddit/DDG via a real browser during research (slow + flaky here due
+   *  to an HTTPS-inspection layer). Default off → fast, reliable News+Wikipedia. */
+  attentionUseBrowser: z.boolean().default(false),
+  /** Re-research a coin only if its cached attention is older than this (minutes). */
+  attentionTtlMin: z.number().int().min(1).max(360).default(30),
+
   // ── Evidence sufficiency (Cycle 1 fix — NOT auto-tunable; structural safety) ──
   /** Min observed trades before organic/momentum carry confidence. Floored at 8. */
   minBuysToDecide: z.number().int().min(8).max(50).default(8),
@@ -138,6 +150,10 @@ export const SettingsSchema = z.object({
   weightSocial: z.number().min(0).default(8),
   /** AI narrative weight — kept small; confirmation only. */
   weightHype: z.number().min(0).default(5),
+  /** Attention Intelligence (Project Athena) weight. Confidence-gated in the blend,
+   *  so it only moves conviction for coins that were actually researched (newborns
+   *  with no web footprint are unaffected). Tunable up toward a first-class signal. */
+  weightAttention: z.number().min(0).default(18),
 
   // ── Optional API keys (free tiers; all optional) ──
   heliusApiKey: z.string().default(""),

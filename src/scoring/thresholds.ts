@@ -20,6 +20,7 @@ export function thresholdsFromSettings(s: Settings): DecisionThresholds {
       smartMoney: s.weightSmartMoney,
       social: s.weightSocial,
       hype: s.weightHype,
+      attention: s.weightAttention,
     },
   };
 }

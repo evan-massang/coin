@@ -3,6 +3,8 @@ import { createServices } from "./services.js";
 import { startServer } from "./dashboard/server.js";
 import { PumpPortalClient } from "./sources/pumpPortal.js";
 import { DexScanner } from "./sources/dexScanner.js";
+import { AttentionService, makeScorer } from "./attention/attentionService.js";
+import { collectEvidence } from "./attention/researchAgent.js";
 import { EntryPipeline } from "./engine/entry.js";
 import { WalletObserver } from "./wallet/walletObserver.js";
 import { ExitEngine } from "./engine/exitEngine.js";
@@ -40,6 +42,21 @@ async function main(): Promise<void> {
     // same exit engine. Pure simulation — never keys, never signing, never chain.
     const paper = new PaperTrader(svc);
     if (svc.settings.get("paperEnabled")) paper.ensureWallet();
+
+    // Project Athena: autonomous attention research. Free (News+Wikipedia, opt-in
+    // browser); local-LLM judge if configured, else heuristic. When a shortlisted
+    // coin's research completes, re-score it with the attention facet.
+    const attention = new AttentionService({
+      enabled: () => svc.settings.get("attentionEnabled"),
+      ttlMs: svc.settings.get("attentionTtlMin") * 60_000,
+      collect: (c) => collectEvidence(c, { useBrowser: svc.settings.get("attentionUseBrowser") }),
+      score: makeScorer(() => ({ baseUrl: svc.settings.get("ollamaBaseUrl"), model: svc.settings.get("attentionLlmModel") })),
+      onComplete: (rec) => {
+        entry?.rescoreWithAttention(rec.mint, rec.scores);
+        log.info(`attention[${rec.source}] $${rec.evidence.symbol ?? rec.mint.slice(0, 6)} — ${rec.scores.narrative}`);
+      },
+    });
+    svc.attention = attention;
 
     const pump = new PumpPortalClient({ newTokens: true });
     entry = new EntryPipeline(svc, pump, {

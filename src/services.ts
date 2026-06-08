@@ -13,6 +13,7 @@ import { WalletClusterRepo } from "./store/repositories/walletClusterRepo.js";
 import { CouncilRepo } from "./store/repositories/councilRepo.js";
 import { EventRecorder } from "./replay/eventRecorder.js";
 import { AiComputer } from "./aiComputer/aiComputer.js";
+import type { AttentionService } from "./attention/attentionService.js";
 import { WsHub } from "./dashboard/websocket.js";
 import { RugcheckCache } from "./sources/rugcheckCache.js";
 import { AlertDispatcher } from "./alerts/dispatcher.js";
@@ -65,6 +66,9 @@ export interface Services {
   rugcheck: RugcheckCache;
   dispatcher: AlertDispatcher;
   runtime: RuntimeState;
+  /** Attention Intelligence research service (Project Athena). Attached in index.ts
+   *  so the engine container stays free of the optional browser/LLM dependencies. */
+  attention?: AttentionService;
 }
 
 export function createServices(db: DB = getDb()): Services {

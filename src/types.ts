@@ -132,6 +132,9 @@ export interface ScoreBreakdown {
   hype: number;
   /** Higher = later/worse entry. >threshold ⇒ TOO_LATE. */
   lateEntryRisk: number;
+  /** Attention Intelligence composite (Project Athena), 0..100. Absent/0 = unresearched
+   *  (then its confidence is 0 and it's dropped from the blend). */
+  attention?: number;
   /** Decision-time DexScreener 5-minute price change % (entry-timing observability). */
   recentM5Pct?: number;
   /** Decision-time DexScreener 1-hour price change % (entry-timing observability). */
@@ -149,6 +152,7 @@ export function emptyScores(): ScoreBreakdown {
     social: 0,
     hype: 0,
     lateEntryRisk: 0,
+    attention: 0,
   };
 }
 

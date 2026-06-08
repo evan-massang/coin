@@ -119,6 +119,46 @@ export class EntryPipeline {
     void this.handleNewToken(token);
   }
 
+  /** Project Athena Phase 17 — re-decide a coin once attention research completes.
+   *  Re-runs decide() with the new attention facet; if the verdict or conviction
+   *  shifts, dispatches an updated signal (BUY_SMALL↔BUY_STRONG↔WATCH↔AVOID can
+   *  change). Re-score only RE-SIGNALS (no paper re-buy — avoids double-fills). */
+  rescoreWithAttention(mint: string, att: { attention: number; confidence: number; narrative: string }): void {
+    const t = this.sm.get(mint);
+    if (!t?.lastDecision || !t.stage1 || !t.lastConfidence) return;
+    const prev = t.lastDecision;
+    const s = this.svc.settings.all();
+    const decision = decide({
+      mint,
+      symbol: prev.symbol,
+      name: prev.name,
+      scores: { ...prev.scores, attention: att.attention },
+      safety: t.stage1,
+      thresholds: thresholdsFromSettings(s),
+      reasons: prev.reasons,
+      flags: prev.flags,
+      confidence: { ...t.lastConfidence, attention: att.confidence },
+      convictionFloor: s.convictionConfidenceFloor,
+      minRealCoverage: s.minRealCoverage,
+      at: Date.now(),
+    });
+    const changed = decision.verdict !== prev.verdict || Math.abs(decision.conviction - prev.conviction) >= 3;
+    if (!changed) {
+      t.lastDecision = { ...prev, scores: decision.scores }; // keep attention score visible
+      return;
+    }
+    // Carry over advisory sizing/intel; prepend the attention rationale.
+    decision.riskTier = prev.riskTier;
+    decision.suggestedRiskPct = prev.suggestedRiskPct;
+    decision.maxPositionSol = prev.maxPositionSol;
+    decision.state = prev.state;
+    decision.coverage = prev.coverage;
+    decision.reasons = [`attention re-score (${prev.verdict}→${decision.verdict}): ${att.narrative}`, ...decision.reasons].slice(0, 6);
+    t.lastDecision = decision;
+    metrics.inc(`rescore_${decision.verdict}`);
+    this.svc.dispatcher.dispatch(decision);
+  }
+
   private prune(): void {
     this.sm.prune();
     // Drop buffers + free watch slots for tokens we no longer track.
@@ -308,6 +348,10 @@ export class EntryPipeline {
       recentPriceChangeH1Pct: dexSnap?.priceChange?.h1,
     });
 
+    // Attention Intelligence (Project Athena): cached research result, if the coin
+    // was already shortlisted + researched. Confidence is 0 when unresearched ⇒ the
+    // facet is dropped from the conviction blend (blind newborns are unaffected).
+    const att = this.svc.attention?.get(token.mint);
     const scores: ScoreBreakdown = {
       safety: stage1.score,
       organic: dex.confident ? dex.organic : scoreOf(results, "organic"),
@@ -321,6 +365,7 @@ export class EntryPipeline {
       // Decision-time run-up context (observability + iteration-2 calibration data).
       recentM5Pct: dexSnap?.priceChange?.m5,
       recentH1Pct: dexSnap?.priceChange?.h1,
+      attention: att?.attention ?? 0,
     };
 
     const reasons = [
@@ -342,6 +387,7 @@ export class EntryPipeline {
     const confidence = {
       organic: dex.confident ? 0.9 : conf("organic"), momentum: dex.confident ? 0.9 : conf("momentum"), graduation: conf("graduation"),
       devReputation: conf("devReputation"), smartMoney: conf("smartMoney"), social: conf("social"), hype: conf("hype"),
+      attention: att?.confidence ?? 0,
     };
     if (dex.confident) reasons.unshift(`dex: ${dex.txns5m} txns/5m, buy-pressure organic ${dex.organic}`);
 
@@ -462,11 +508,18 @@ export class EntryPipeline {
     this.recordIntel(intel);
 
     tracked.lastDecision = decision;
+    tracked.lastConfidence = confidence; // for attention re-score (Athena Phase 17)
     metrics.inc(`scored_${decision.verdict}`);
 
     const priceUsd = dexSnap?.priceUsd ?? (await this.priceFor(token.mint));
     this.svc.dispatcher.dispatch(decision, { priceAtAlert: priceUsd });
     this.hooks.onDecision?.(decision, tracked);
+
+    // Project Athena: auto-research shortlisted coins (WATCH/BUY — never AVOID).
+    // Async + cached; rescoreWithAttention() re-decides this coin when it completes.
+    if (decision.verdict === "WATCH_ONLY" || decision.verdict === "BUY_SMALL" || decision.verdict === "BUY_STRONG") {
+      this.svc.attention?.request({ mint: token.mint, symbol: token.symbol, name: token.name, verdict: decision.verdict });
+    }
 
     // Resource bound: stop metered trade stream for non-BUY outcomes (freeing a
     // subscription slot). BUY survivors stay subscribed for the exit engine.
