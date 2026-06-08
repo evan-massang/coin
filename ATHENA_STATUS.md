@@ -65,3 +65,59 @@ In CONFIG / settings: `attentionEnabled` (on), `weightAttention` (18 → raise t
 - `npm test` — full suite (green).
 - `npx tsx scripts/research/_athena_probe.ts <name> <SYMBOL>` — live attention read.
 - Dashboard → reasoning feed: look for the 👁 attention rows.
+
+---
+
+# Decision Authority + Data-Truth (overnight 2026-06-08, continued)
+
+The night's headline: **attention now GATES executed buys** (it used to land after the
+buy — "watching, not controlling"), and a standing audit proves it can't be bypassed.
+Plus the data-truth audit's worst mislabels are fixed and guarded against regression.
+
+## ✅ DONE (built, tested, Verified Working live)
+- **Readiness Gate (Phase 21)** — a would-be BUY is held at WATCH until attention
+  research has RUN for the coin; the re-score then recomputes MiroFish risk sizing and
+  EXECUTES the attention-informed buy. Keys on *researched*, NOT *positive attention*,
+  so footprint-less newborns research-to-empty and are bought on fundamentals (no
+  deadlock). Default ON, only active when attention is enabled + weighted.
+  *Verified:* `rescore_BUY_SMALL == attention_gated_buy`, `scored_BUY_* == 0` (no buy
+  bypassed), and live coins (GN, Gus) were held at WATCH then upgraded to open
+  positions after research.
+- **Decision authority record (Phase 17/22)** — `GET /api/authority`: per executed
+  paper buy, which intelligence backed it (attention score/confidence + research time)
+  + the invariant `noSilentBypass`. *Verified:* gateOn=true, 60/60 recent buys
+  researched, noSilentBypass=true.
+- **Decision-influence breakdown (Phase 18)** — `src/debug/decisionAuthority.ts`:
+  per-facet conviction contribution, `attentionInfluencePct`, and legacy-vs-Athena
+  divergence (does attention flip the verdict?).
+- **Data Truth Validator (Phase 0)** — `GET /api/data-truth`: standing provenance
+  checks (equity/PnL identities, per-fill ledger vs cash-derived realized, conviction
+  range, coin-age capture health, attention feed⊆store). Caught a real ledger drift
+  (Δ ~0.73 SOL) the moment it ran.
+- **Automated self-audit (Phase 15)** — `GET /api/athena-audit` + a log line every
+  5 min: one PASS/WARN/FAIL verdict rolling up data-truth + authority. *Currently
+  WARN* (0 failures; the one warning is the known per-fill ledger drift).
+- **Critical mislabels fixed (Phase 0/16), Playwright-verified:**
+  - **AGE column** now shows TRUE coin age from DexScreener `pairCreatedAt`; falls back
+    to honestly-marked `~recency` (tooltip) when no DEX pair exists. (Was: signal
+    recency mislabeled as coin age — the audit's only CRITICAL.)
+  - **Observation tiles** un-swapped: CONVICTION (score, no bogus %), TIER, OBSERVED
+    (watch time, not coin age).
+  - **Evidence-lean meter** can no longer claim "evidence supports a position" when the
+    verdict is WATCH/AVOID — it now reads "bullish lean — but verdict is X (gates/caps
+    overrode)", which also surfaces the gate's effect.
+  - **Liquidity chip** uses the configurable `minLiquidityUsd`, not a hardcoded $3000.
+
+## 🟡 OPEN QUESTION (the real one)
+Does the gate HELP profitability? Equity is ~breakeven (−1.9%, win-rate ~10% with rare
+big winners — the classic meme distribution). The binding constraint remains ENTRY
+TIMING, and the gate adds research latency before entry. The attention bet is that
+research improves *which* coins we enter. **This needs forward outcome data** — the
+engine is running with the gate on, persisting attention + outcomes; evaluate once
+enough gated buys resolve.
+
+## How to check the authority/truth state
+- `GET /api/athena-audit` — one verdict (PASS/WARN/FAIL) + the detail.
+- `GET /api/authority` — per-buy "who authorized this" + noSilentBypass.
+- `GET /api/data-truth` — the provenance checks.
+- Engine log: grep `athena-audit:` for the 5-min verdict.
