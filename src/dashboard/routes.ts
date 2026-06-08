@@ -6,6 +6,8 @@ import { getMarketMacro } from "../sources/coingecko.js";
 import { fetchMarketWeather } from "../agents/marketWeather.js";
 import { classifyRegime } from "../graph/marketRegime.js";
 import { buildReasoningFeed, buildReasoningReport } from "./reasoning.js";
+import { computePaperStats } from "../paper/paperPnL.js";
+import { validateDataTruth } from "../debug/dataTruthValidator.js";
 
 /** Core read API: status, journal/signals, positions, tokens. */
 export function coreRoutes(svc: Services): Router {
@@ -49,6 +51,24 @@ export function coreRoutes(svc: Services): Router {
 
   r.get("/journal/stats", (_req, res) => {
     res.json(svc.signals.stats());
+  });
+
+  // Phase 0 Data Truth: a standing provenance check — equity/PnL identities, the
+  // per-fill ledger vs cash-derived realized reconciliation, conviction range, coin-age
+  // capture health, and attention feed-vs-store consistency. Surfaces drift; never hides.
+  r.get("/data-truth", (_req, res) => {
+    const open = svc.paperPositions.byStatus(true);
+    const closed = svc.paperPositions.byStatus(false);
+    const stats = computePaperStats(svc.paper.get(), open, closed, svc.paper.realizedPnlSol());
+    const signals = svc.signals.recent(120).map((s) => ({ conviction: s.conviction, pairCreatedAt: s.pairCreatedAt }));
+    const report = validateDataTruth({
+      stats,
+      ledgerRealizedSol: svc.paper.realizedPnlSol(),
+      signals,
+      attentionFeedCount: svc.attention?.recent(120).length ?? 0,
+      attentionDbCount: svc.attentionRepo.count(),
+    });
+    res.json({ at: Date.now(), ...report });
   });
 
   // Live "Reasoning Feed": merged, newest-first stream of WHY the engine + AI
