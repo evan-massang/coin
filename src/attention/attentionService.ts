@@ -43,6 +43,7 @@ export interface AttentionServiceOpts {
 
 export class AttentionService {
   private readonly cache = new Map<string, AttentionRecord>();
+  private readonly order: string[] = []; // mints, newest last (for recent())
   private readonly queued = new Set<string>();
   private readonly queue: CoinRef[] = [];
   private running = false;
@@ -70,6 +71,16 @@ export class AttentionService {
 
   record(mint: string): AttentionRecord | undefined {
     return this.cache.get(mint);
+  }
+
+  /** Most-recently-researched coins, newest first (for the dashboard/transcript). */
+  recent(limit = 40): AttentionRecord[] {
+    const out: AttentionRecord[] = [];
+    for (let i = this.order.length - 1; i >= 0 && out.length < limit; i--) {
+      const rec = this.cache.get(this.order[i]);
+      if (rec) out.push(rec);
+    }
+    return out;
   }
 
   /** Enqueue research for a shortlisted coin. Deduped + TTL-gated. `force` ignores both. */
@@ -103,6 +114,10 @@ export class AttentionService {
           const { scores, source } = await this.score(evidence);
           const rec: AttentionRecord = { mint: coin.mint, scores, evidence, at: this.now(), source };
           this.cache.set(coin.mint, rec);
+          const oi = this.order.indexOf(coin.mint);
+          if (oi >= 0) this.order.splice(oi, 1);
+          this.order.push(coin.mint);
+          if (this.order.length > 500) this.order.shift();
           try {
             this.onComplete?.(rec);
           } catch (e) {

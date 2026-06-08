@@ -5,7 +5,7 @@ import type { Services } from "../services.js";
 // coin. Read-only over the journals (signals, council_opinions, paper_trades).
 
 export interface ReasoningItem {
-  kind: "council" | "buy" | "sell" | "avoid";
+  kind: "council" | "buy" | "sell" | "avoid" | "attention";
   at: number;
   symbol: string;
   mint: string;
@@ -20,6 +20,7 @@ interface Gathered {
   buys: ReasoningItem[];
   sells: ReasoningItem[];
   avoids: ReasoningItem[];
+  attention: ReasoningItem[];
   symOf: (mint: string) => string;
 }
 
@@ -111,13 +112,28 @@ function gather(svc: Services, limit: number): Gathered {
     });
   }
 
-  return { council, buys, sells, avoids, symOf };
+  // ── Attention Intelligence research (Project Athena) — why humans care. ──
+  const attention: ReasoningItem[] = [];
+  for (const r of svc.attention?.recent(30) ?? []) {
+    const s = r.scores;
+    attention.push({
+      kind: "attention",
+      at: r.at,
+      mint: r.mint,
+      symbol: r.evidence.symbol || symOf(r.mint),
+      headline: `attention ${Math.round(s.attention)} · H${Math.round(s.humanity)} V${Math.round(s.virality)} OC${Math.round(s.outsideCrypto)} C${Math.round(s.culturalStrength)} (${r.source})`,
+      tone: s.attention >= 60 ? "bull" : s.attention <= 35 ? "bear" : "neutral",
+      lines: [s.narrative, ...s.reasons.slice(0, 3), `evidence: ${r.evidence.posts.length} posts · ${r.evidence.platforms.join(", ") || "none"}`],
+    });
+  }
+
+  return { council, buys, sells, avoids, attention, symOf };
 }
 
 /** Merged, newest-first reasoning stream for the live dashboard panel. */
 export function buildReasoningFeed(svc: Services, limit = 60): ReasoningItem[] {
   const g = gather(svc, limit);
-  return [...g.council, ...g.buys, ...g.sells]
+  return [...g.council, ...g.attention, ...g.buys, ...g.sells]
     .sort((a, b) => b.at - a.at)
     .slice(0, limit);
 }

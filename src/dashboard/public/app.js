@@ -531,7 +531,7 @@ async function renderPaper() {
 
 // ── reasoning feed (live "why it buys / sells / avoids") ──
 const RZ = { kind: "all" };
-function rzIcon(k) { return k === "council" ? "🧠" : k === "buy" ? "🟢" : k === "sell" ? "🔴" : "⚪"; }
+function rzIcon(k) { return k === "council" ? "🧠" : k === "buy" ? "🟢" : k === "sell" ? "🔴" : k === "attention" ? "👁" : "⚪"; }
 function rzRow(it) {
   const toneCol = it.tone === "bull" ? "green" : it.tone === "bear" ? "red" : "gold";
   const pnl = it.pnlSol != null ? ` <span class="${it.pnlSol >= 0 ? "green" : "red"}">${it.pnlSol >= 0 ? "+" : ""}${it.pnlSol.toFixed(3)} SOL</span>` : "";
