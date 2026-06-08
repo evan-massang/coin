@@ -79,6 +79,28 @@ export function coreRoutes(svc: Services): Router {
     res.json(runAthenaAudit(svc, Date.now()));
   });
 
+  // Phase 2/13 — a coin's decision EVOLUTION: every journalled decision oldest→newest,
+  // so the operator can SEE conviction/verdict change over time (initial score →
+  // attention re-score WATCH→BUY → exit). Each step shows what moved it.
+  r.get("/evolution/:mint", (req, res) => {
+    const rows = svc.signals.forMint(req.params.mint, 100);
+    res.json({
+      mint: req.params.mint,
+      symbol: rows[rows.length - 1]?.symbol,
+      steps: rows.length,
+      timeline: rows.map((s, idx) => ({
+        at: s.at,
+        verdict: s.verdict,
+        conviction: s.conviction,
+        attention: s.scores.attention,
+        convictionDelta: idx > 0 ? s.conviction - rows[idx - 1].conviction : 0,
+        verdictChanged: idx > 0 && s.verdict !== rows[idx - 1].verdict,
+        flags: s.flags,
+        topReason: s.reasons[0] ?? null,
+      })),
+    });
+  });
+
   // Phase 17/22 Decision Authority: per executed paper buy, which intelligence backed
   // it; plus THE invariant — when the Readiness Gate is on, no buy bypasses attention
   // (the legacy pre-research scored_BUY_* counter must be 0). Proves Athena gates buys.

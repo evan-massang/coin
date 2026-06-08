@@ -127,6 +127,16 @@ export class SignalsRepo {
     return rows.map(rowToSignal);
   }
 
+  /** Every journalled decision for one mint, OLDEST→newest — the coin's full
+   *  conviction/verdict EVOLUTION: initial score → attention re-score (WATCH→BUY) →
+   *  exit signals. Surfaces explainability of how a decision changed over time. */
+  forMint(mint: string, limit = 100): SignalRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM signals WHERE mint=? ORDER BY at ASC LIMIT ?")
+      .all(mint, limit) as Record<string, unknown>[];
+    return rows.map(rowToSignal);
+  }
+
   /**
    * BUY/WATCH signals from the last `windowMs` — what the outcome tracker
    * re-prices to fill the forward path (5m/15m/1h samples + max gain/drawdown).
