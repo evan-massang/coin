@@ -44,6 +44,9 @@ export interface DecisionThresholds {
    *  (scores.recentM5Pct) exceeds this % (0 = off). Cycle-8: realized PnL collapses
    *  for already-popped coins (m5 25–75% → −16% realized vs −7% for 0–25%). */
   maxEntryRunupM5Pct?: number;
+  /** Athena Readiness Gate (Phase 21): hold a would-be BUY at WATCH until attention
+   *  research has RUN (confidence.attention > 0). Makes attention gate executed buys. */
+  attentionReadinessGate?: boolean;
   weights: ConvictionWeights;
 }
 
@@ -63,6 +66,12 @@ export interface DecisionInput {
   convictionFloor?: number;
   /** If real-evidence coverage falls below this, conviction is capped to WATCH (default 0.5). */
   minRealCoverage?: number;
+  /** Whether attention research has RUN for this coin (Phase 21 readiness gate). When
+   *  the gate is on, a would-be BUY is held to WATCH until this is true — then it's
+   *  decided on merit (the attention facet contributes only if it found evidence). A
+   *  coin with NO external footprint researches to empty, so it's never blocked
+   *  forever — it's bought on fundamentals once we've confirmed there's no attention. */
+  attentionResearched?: boolean;
   at: number;
 }
 
@@ -197,6 +206,19 @@ export function decide(input: DecisionInput): Decision {
   else if (conviction >= thresholds.minConvictionBuySmall) verdict = "BUY_SMALL";
   else if (conviction >= WATCH_MIN_CONVICTION) verdict = "WATCH_ONLY";
   else verdict = "AVOID";
+
+  // Athena Readiness Gate (Phase 21): don't EXECUTE a BUY before attention research
+  // has actually RUN for this coin — hold it at WATCH (which triggers research); the
+  // re-score, once research lands, makes the real attention-informed buy. This is what
+  // makes attention GATE executed trades instead of just watching after the fact.
+  // KEY: the gate keys on whether research has RUN, NOT on a positive attention score —
+  // a coin with no external footprint researches to empty (confidence 0) and is then
+  // bought on fundamentals, so the gate never deadlocks the engine's newborn universe.
+  if (thresholds.attentionReadinessGate && (verdict === "BUY_SMALL" || verdict === "BUY_STRONG") && !input.attentionResearched) {
+    caps.push("awaiting-attention⇒WATCH");
+    flags.push("awaiting-attention");
+    verdict = "WATCH_ONLY";
+  }
 
   return mk(verdict, conviction);
 }

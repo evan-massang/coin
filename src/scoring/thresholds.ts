@@ -12,6 +12,9 @@ export function thresholdsFromSettings(s: Settings): DecisionThresholds {
     minMomentumForBuy: s.minMomentumForBuy,
     maxMomentumForBuy: s.maxMomentumForBuy,
     maxEntryRunupM5Pct: s.maxEntryRunupM5Pct,
+    // Gate active only when attention is genuinely on (enabled + weighted), so it
+    // never deadlocks buys when attention is off.
+    attentionReadinessGate: s.attentionReadinessGate && s.attentionEnabled && s.weightAttention > 0,
     weights: {
       organic: s.weightOrganic,
       momentum: s.weightMomentum,

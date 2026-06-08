@@ -1,6 +1,7 @@
 import type { Decision, NewToken, SafetyResult } from "../types.js";
 import type { RugcheckReport } from "../sources/rugcheck.js";
 import type { FacetConfidence } from "../scoring/conviction.js";
+import type { RiskContext } from "../risk/riskTypes.js";
 
 // Per-token lifecycle. A token moves NEW → (Stage-0) → OBSERVING → SCORED, or
 // is AVOIDED at any hard gate. OBSERVING is the Stage-1 window (30–180s) during
@@ -18,6 +19,11 @@ export interface TrackedToken {
   lastDecision?: Decision;
   /** Per-facet confidence from the last decision — reused by the attention re-score. */
   lastConfidence?: FacetConfidence;
+  /** Verdict-independent risk inputs from the last score (weather/agreement/scam
+   *  multipliers, liquidity, tuning). The attention re-score reuses these to RECOMPUTE
+   *  real position sizing when it upgrades a gated WATCH to BUY — a gated WATCH was
+   *  sized 0%, so without this an attention-driven buy would execute at zero. */
+  lastRiskBase?: Omit<RiskContext, "verdict" | "conviction" | "scores">;
   /** Full RugCheck report (for the risk layer + UI; Phase 1 stashes it). */
   rugcheck?: RugcheckReport;
 }

@@ -266,3 +266,63 @@ describe("decide() — gate → score → cap → verdict", () => {
     expect(d.conviction).toBeLessThan(THRESHOLDS.minConvictionBuySmall);
   });
 });
+
+describe("decide() — Athena Readiness Gate (Phase 21)", () => {
+  // A strong vector that WOULD buy. The gate must hold it at WATCH until attention
+  // research has actually RUN (attentionResearched true) — NOT until attention is
+  // positive, so a coin with no footprint can't deadlock.
+  const strong = {
+    organic: 80, momentum: 90, graduation: 80, devReputation: 80, smartMoney: 85, social: 70, hype: 60, lateEntryRisk: 10,
+  };
+
+  it("holds a would-be BUY at WATCH until attention research has run", () => {
+    const d = decide({
+      mint: "M", at,
+      scores: scores(strong),
+      safety: safety(true),
+      thresholds: { ...THRESHOLDS, attentionReadinessGate: true },
+      attentionResearched: false,
+    });
+    expect(d.verdict).toBe("WATCH_ONLY");
+    expect(d.flags).toContain("awaiting-attention");
+    expect(d.caps).toContain("awaiting-attention⇒WATCH");
+  });
+
+  it("allows the BUY once research has run — even if it found NOTHING (no deadlock)", () => {
+    // attention confidence 0 (empty research) but attentionResearched true ⇒ decided on
+    // fundamentals. This is the key anti-deadlock case for footprint-less newborns.
+    const d = decide({
+      mint: "M", at,
+      scores: scores(strong),
+      safety: safety(true),
+      thresholds: { ...THRESHOLDS, attentionReadinessGate: true },
+      confidence: { organic: 1, momentum: 1, graduation: 1, devReputation: 1, smartMoney: 1, social: 1, hype: 1, attention: 0 },
+      attentionResearched: true,
+    });
+    expect(["BUY_SMALL", "BUY_STRONG"]).toContain(d.verdict);
+    expect(d.flags).not.toContain("awaiting-attention");
+  });
+
+  it("gate OFF ⇒ legacy behaviour: the BUY is allowed without research", () => {
+    const d = decide({
+      mint: "M", at,
+      scores: scores(strong),
+      safety: safety(true),
+      thresholds: { ...THRESHOLDS, attentionReadinessGate: false },
+      attentionResearched: false,
+    });
+    expect(["BUY_SMALL", "BUY_STRONG"]).toContain(d.verdict);
+  });
+
+  it("never blocks a WATCH/AVOID (only demotes would-be buys)", () => {
+    const weak = { organic: 46, momentum: 30, hype: 40 };
+    const d = decide({
+      mint: "M", at,
+      scores: scores(weak),
+      safety: safety(true),
+      thresholds: { ...THRESHOLDS, attentionReadinessGate: true },
+      attentionResearched: false,
+    });
+    expect(d.flags).not.toContain("awaiting-attention"); // wasn't a buy, nothing to hold
+  });
+});

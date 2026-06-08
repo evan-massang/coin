@@ -103,6 +103,11 @@ export const SettingsSchema = z.object({
   attentionUseBrowser: z.boolean().default(false),
   /** Re-research a coin only if its cached attention is older than this (minutes). */
   attentionTtlMin: z.number().int().min(1).max(360).default(30),
+  /** Athena Readiness Gate (Phase 21): hold a would-be BUY at WATCH until attention
+   *  research has actually RUN for the coin, then let the re-score make the real,
+   *  attention-informed buy. This is what makes attention GATE executed trades
+   *  instead of just watching. Only active when attention is enabled + weighted. */
+  attentionReadinessGate: z.boolean().default(true),
 
   // ── Evidence sufficiency (Cycle 1 fix — NOT auto-tunable; structural safety) ──
   /** Min observed trades before organic/momentum carry confidence. Floored at 8. */

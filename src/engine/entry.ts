@@ -119,15 +119,21 @@ export class EntryPipeline {
     void this.handleNewToken(token);
   }
 
-  /** Project Athena Phase 17 — re-decide a coin once attention research completes.
-   *  Re-runs decide() with the new attention facet; if the verdict or conviction
-   *  shifts, dispatches an updated signal (BUY_SMALL↔BUY_STRONG↔WATCH↔AVOID can
-   *  change). Re-score only RE-SIGNALS (no paper re-buy — avoids double-fills). */
+  /** Project Athena Phase 17/21 — re-decide a coin once attention research completes.
+   *  Re-runs decide() with the new attention facet. If the readiness gate had held a
+   *  would-be buy at WATCH (no research yet), and attention now confirms a BUY, this
+   *  recomputes risk sizing and EXECUTES the attention-informed buy — so attention
+   *  genuinely gates the executed trade. Only executes on a non-buy→buy UPGRADE, so a
+   *  coin already bought via the normal path is never double-filled. */
   rescoreWithAttention(mint: string, att: { attention: number; confidence: number; narrative: string }): void {
     const t = this.sm.get(mint);
     if (!t?.lastDecision || !t.stage1 || !t.lastConfidence) return;
     const prev = t.lastDecision;
     const s = this.svc.settings.all();
+    // Carry forward the prior flags but DROP "awaiting-attention" — research has now
+    // run, so that hold no longer applies; leaving it would mislabel the re-scored
+    // decision as still waiting. Dedupe so repeated scores don't stack duplicates.
+    const carriedFlags = [...new Set((prev.flags ?? []).filter((f) => f !== "awaiting-attention"))];
     const decision = decide({
       mint,
       symbol: prev.symbol,
@@ -136,10 +142,11 @@ export class EntryPipeline {
       safety: t.stage1,
       thresholds: thresholdsFromSettings(s),
       reasons: prev.reasons,
-      flags: prev.flags,
+      flags: carriedFlags,
       confidence: { ...t.lastConfidence, attention: att.confidence },
       convictionFloor: s.convictionConfidenceFloor,
       minRealCoverage: s.minRealCoverage,
+      attentionResearched: true, // we are HERE because research just completed
       at: Date.now(),
     });
     const changed = decision.verdict !== prev.verdict || Math.abs(decision.conviction - prev.conviction) >= 3;
@@ -147,16 +154,38 @@ export class EntryPipeline {
       t.lastDecision = { ...prev, scores: decision.scores }; // keep attention score visible
       return;
     }
-    // Carry over advisory sizing/intel; prepend the attention rationale.
-    decision.riskTier = prev.riskTier;
-    decision.suggestedRiskPct = prev.suggestedRiskPct;
-    decision.maxPositionSol = prev.maxPositionSol;
+    const nowBuy = decision.verdict === "BUY_SMALL" || decision.verdict === "BUY_STRONG";
+    const wasBuy = prev.verdict === "BUY_SMALL" || prev.verdict === "BUY_STRONG";
+    // Recompute risk sizing. A gated WATCH was sized 0% (computeRisk returns NONE for
+    // a non-BUY), so an attention-upgraded BUY MUST resize or it would execute at zero.
+    // Reuse the verdict-independent inputs captured at score time (weather brake,
+    // source-agreement, scam-memory all preserved). Fall back to the prior advisory
+    // sizing if the base wasn't captured.
+    if (nowBuy && t.lastRiskBase) {
+      const risk = computeRisk({ verdict: decision.verdict, conviction: decision.conviction, scores: decision.scores, ...t.lastRiskBase });
+      decision.riskTier = risk.riskTier;
+      decision.suggestedRiskPct = risk.suggestedRiskPct;
+      decision.maxPositionSol = risk.maxPositionSol;
+    } else {
+      decision.riskTier = prev.riskTier;
+      decision.suggestedRiskPct = prev.suggestedRiskPct;
+      decision.maxPositionSol = prev.maxPositionSol;
+    }
     decision.state = prev.state;
     decision.coverage = prev.coverage;
     decision.reasons = [`attention re-score (${prev.verdict}→${decision.verdict}): ${att.narrative}`, ...decision.reasons].slice(0, 6);
     t.lastDecision = decision;
     metrics.inc(`rescore_${decision.verdict}`);
     this.svc.dispatcher.dispatch(decision);
+    // EXECUTE only on a genuine non-buy→buy UPGRADE — this is what makes attention
+    // GATE the executed trade (the readiness gate held the buy at WATCH until research
+    // landed). A coin already bought via the normal path (wasBuy) is never double-filled,
+    // and an already-open paper position (e.g. carried across a restart) is never
+    // averaged into.
+    if (nowBuy && !wasBuy && !this.svc.paperPositions.openByMint(mint)) {
+      this.hooks.onDecision?.(decision, t);
+      metrics.inc("attention_gated_buy");
+    }
   }
 
   private prune(): void {
@@ -403,6 +432,8 @@ export class EntryPipeline {
       confidence,
       convictionFloor: s.convictionConfidenceFloor,
       minRealCoverage: s.minRealCoverage,
+      // Readiness gate (Phase 21): research has run iff we already hold a record.
+      attentionResearched: att !== undefined,
       at: now,
     });
     // Phase 4: market weather (macro + the engine's own win rate) + source
@@ -446,11 +477,10 @@ export class EntryPipeline {
     const cluster = clusterRisk(this.svc.walletCluster.rugOverlap(buyers));
     const scamMemoryMultiplier = deployer.multiplier * sim.multiplier * cluster.multiplier;
 
-    // MiroFish dynamic risk sizing (advisory / paper-only).
-    const risk = computeRisk({
-      verdict: decision.verdict,
-      conviction: decision.conviction,
-      scores,
+    // MiroFish dynamic risk sizing (advisory / paper-only). The verdict-independent
+    // inputs are stashed on the tracked token so the attention re-score can RECOMPUTE
+    // sizing if it upgrades a gated WATCH (sized 0%) to a real BUY.
+    const riskBase = {
       safetyPass: stage1.pass,
       unknownCount: stage1.unknownCount,
       honeypot: tracked.rugcheck?.honeypot,
@@ -463,7 +493,9 @@ export class EntryPipeline {
       maxRiskPct: s.maxRiskPct,
       minRiskPct: s.minRiskPct,
       maxPositionSol: s.paperMaxPositionSol,
-    });
+    };
+    tracked.lastRiskBase = riskBase;
+    const risk = computeRisk({ verdict: decision.verdict, conviction: decision.conviction, scores, ...riskBase });
     decision.riskTier = risk.riskTier;
     decision.suggestedRiskPct = risk.suggestedRiskPct;
     decision.maxPositionSol = risk.maxPositionSol;
