@@ -51,7 +51,9 @@ async function main(): Promise<void> {
       ttlMs: svc.settings.get("attentionTtlMin") * 60_000,
       collect: (c) => collectEvidence(c, { useBrowser: svc.settings.get("attentionUseBrowser") }),
       score: makeScorer(() => ({ baseUrl: svc.settings.get("ollamaBaseUrl"), model: svc.settings.get("attentionLlmModel") })),
+      warm: svc.attentionRepo.recent(200), // survive restarts via the durable store
       onComplete: (rec) => {
+        svc.attentionRepo.upsert(rec); // persist (meme graveyard + durable cache)
         entry?.rescoreWithAttention(rec.mint, rec.scores);
         log.info(`attention[${rec.source}] $${rec.evidence.symbol ?? rec.mint.slice(0, 6)} — ${rec.scores.narrative}`);
       },

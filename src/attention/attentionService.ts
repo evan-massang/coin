@@ -39,6 +39,8 @@ export interface AttentionServiceOpts {
   onComplete?: (rec: AttentionRecord) => void;
   /** Injectable clock for tests. */
   now?: () => number;
+  /** Records to warm the in-memory cache on boot (from the durable store). */
+  warm?: AttentionRecord[];
 }
 
 export class AttentionService {
@@ -62,6 +64,11 @@ export class AttentionService {
     this.enabled = opts.enabled ?? (() => true);
     this.onComplete = opts.onComplete;
     this.now = opts.now ?? (() => Date.now());
+    // Warm the cache from the durable store (newest-first ⇒ reverse for chrono order).
+    for (const rec of [...(opts.warm ?? [])].reverse()) {
+      this.cache.set(rec.mint, rec);
+      this.order.push(rec.mint);
+    }
   }
 
   /** Cached attention for a mint (undefined if never/expired — caller degrades). */

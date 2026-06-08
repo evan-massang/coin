@@ -338,6 +338,32 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_pps_at ON paper_price_samples(at);
     `,
   },
+  {
+    version: 10,
+    up: /* sql */ `
+      -- Project Athena: attention research results, durable across restarts +
+      -- a "meme graveyard" of every researched coin (latest snapshot per mint).
+      CREATE TABLE IF NOT EXISTS attention_research (
+        mint           TEXT PRIMARY KEY,
+        symbol         TEXT,
+        name           TEXT,
+        at             INTEGER NOT NULL,
+        source         TEXT NOT NULL,
+        attention      REAL NOT NULL,
+        humanity       REAL NOT NULL,
+        virality       REAL NOT NULL,
+        outside_crypto REAL NOT NULL,
+        cultural       REAL NOT NULL,
+        confidence     REAL NOT NULL,
+        narrative      TEXT,
+        posts_count    INTEGER,
+        platforms      TEXT,
+        evidence_json  TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_attn_at ON attention_research(at);
+      CREATE INDEX IF NOT EXISTS idx_attn_score ON attention_research(attention);
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

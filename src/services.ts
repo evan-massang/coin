@@ -14,6 +14,7 @@ import { CouncilRepo } from "./store/repositories/councilRepo.js";
 import { EventRecorder } from "./replay/eventRecorder.js";
 import { AiComputer } from "./aiComputer/aiComputer.js";
 import type { AttentionService } from "./attention/attentionService.js";
+import { AttentionRepo } from "./store/repositories/attentionRepo.js";
 import { WsHub } from "./dashboard/websocket.js";
 import { RugcheckCache } from "./sources/rugcheckCache.js";
 import { AlertDispatcher } from "./alerts/dispatcher.js";
@@ -69,6 +70,8 @@ export interface Services {
   /** Attention Intelligence research service (Project Athena). Attached in index.ts
    *  so the engine container stays free of the optional browser/LLM dependencies. */
   attention?: AttentionService;
+  /** Durable attention research store (Project Athena meme graveyard). */
+  attentionRepo: AttentionRepo;
 }
 
 export function createServices(db: DB = getDb()): Services {
@@ -86,6 +89,7 @@ export function createServices(db: DB = getDb()): Services {
   const walletCluster = new WalletClusterRepo(db);
   const council = new CouncilRepo(db);
   const events = new EventRecorder(db);
+  const attentionRepo = new AttentionRepo(db);
   const hub = new WsHub();
   const rugcheck = new RugcheckCache();
   // Runtime is built up-front so the AI council can read live graph intelligence
@@ -121,6 +125,7 @@ export function createServices(db: DB = getDb()): Services {
     walletCluster,
     council,
     events,
+    attentionRepo,
     aiComputer,
     hub,
     rugcheck,
