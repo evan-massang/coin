@@ -23,10 +23,12 @@ describe("dexSignals — free DexScreener trade-flow proxy (Cycle 4)", () => {
     expect(dumping.organic).toBeLessThan(40); // sell-dominated ⇒ low organic
   });
 
-  it("momentum rewards velocity + positive price action, penalizes dumps", () => {
-    const hot = dexSignals(snap({ liquidityUsd: 8000, txns: { m5: { buys: 40, sells: 8 } }, volume: { m5: 9000 }, priceChange: { m5: 35 } }));
-    const cold = dexSignals(snap({ liquidityUsd: 8000, txns: { m5: { buys: 5, sells: 6 } }, volume: { m5: 200 }, priceChange: { m5: -20 } }));
-    expect(hot.momentum).toBeGreaterThan(cold.momentum);
-    expect(hot.momentum).toBeGreaterThanOrEqual(55);
+  it("momentum rewards the early/flat sweet-spot + velocity, penalizes chasing a pump (Cycle 8 pivot)", () => {
+    const sweet = dexSignals(snap({ liquidityUsd: 8000, txns: { m5: { buys: 40, sells: 8 } }, volume: { m5: 9000 }, priceChange: { m5: 8 } })); // flat/early + alive
+    const chase = dexSignals(snap({ liquidityUsd: 8000, txns: { m5: { buys: 40, sells: 8 } }, volume: { m5: 9000 }, priceChange: { m5: 60 } })); // already pumped +60%
+    const knife = dexSignals(snap({ liquidityUsd: 8000, txns: { m5: { buys: 5, sells: 18 } }, volume: { m5: 200 }, priceChange: { m5: -45 } })); // dumping hard
+    expect(sweet.momentum).toBeGreaterThan(chase.momentum); // don't chase a pump
+    expect(sweet.momentum).toBeGreaterThan(knife.momentum); // don't catch a falling knife
+    expect(sweet.momentum).toBeGreaterThanOrEqual(55); // early + alive scores high
   });
 });

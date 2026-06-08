@@ -170,6 +170,32 @@ describe("decide() — gate → score → cap → verdict", () => {
     expect(d.caps).toContain("lateEntry⇒TOO_LATE");
   });
 
+  it("SHADOW mode: high lateEntryRisk flags 'would block' but does NOT change the verdict", () => {
+    // The guard now reads the FREE DexScreener run-up, but ships in shadow until
+    // forward data calibrates the threshold (winners dip before they rip).
+    const strong = {
+      organic: 70, momentum: 90, smartMoney: 90, graduation: 85, devReputation: 80, lateEntryRisk: 80,
+    };
+    const shadow = decide({
+      mint: "M", at,
+      scores: scores(strong),
+      safety: safety(true),
+      thresholds: { ...THRESHOLDS, lateEntryEnforce: false },
+    });
+    expect(shadow.verdict).not.toBe("TOO_LATE");
+    expect(["BUY_SMALL", "BUY_STRONG"]).toContain(shadow.verdict);
+    expect(shadow.flags).toContain("late-entry-shadow");
+    expect(shadow.caps.some((c) => c.includes("shadow"))).toBe(true);
+    // Same setup WITH enforcement ⇒ blocked, as before.
+    const enforced = decide({
+      mint: "M", at,
+      scores: scores(strong),
+      safety: safety(true),
+      thresholds: { ...THRESHOLDS, lateEntryEnforce: true },
+    });
+    expect(enforced.verdict).toBe("TOO_LATE");
+  });
+
   it("≥2 UNKNOWN safety items flags but no longer CAPS conviction (Cycle 7)", () => {
     // On the free feed safety unknowns are structural/permanent; they pegged every
     // BUY at 59 and made BUY_STRONG unreachable. They now flag (transparency) but
@@ -209,6 +235,22 @@ describe("decide() — gate → score → cap → verdict", () => {
     // Floor 85 with momentum 90 ⇒ still BUYs (above the floor).
     const passes = decide({ mint: "M", at, scores: scores({ ...strong, momentum: 90 }), safety: safety(true), thresholds: { ...THRESHOLDS, minMomentumForBuy: 85 } });
     expect(["BUY_SMALL", "BUY_STRONG"]).toContain(passes.verdict);
+  });
+
+  it("momentum CEILING holds a hot-momentum would-be BUY to WATCH (Cycle 8 — anti-chase)", () => {
+    const strong = {
+      organic: 80, momentum: 90, graduation: 80, devReputation: 80, smartMoney: 85, social: 70, hype: 60, lateEntryRisk: 10,
+    };
+    // No ceiling ⇒ this strong vector BUYs.
+    const noCeil = decide({ mint: "M", at, scores: scores(strong), safety: safety(true), thresholds: THRESHOLDS });
+    expect(["BUY_SMALL", "BUY_STRONG"]).toContain(noCeil.verdict);
+    // Ceiling 70 with momentum 90 ⇒ held to WATCH, flagged as a chase.
+    const capped = decide({ mint: "M", at, scores: scores(strong), safety: safety(true), thresholds: { ...THRESHOLDS, maxMomentumForBuy: 70 } });
+    expect(capped.verdict).toBe("WATCH_ONLY");
+    expect(capped.flags).toContain("high-momentum-chase");
+    // Ceiling 70 with momentum 55 ⇒ still BUYs (below the ceiling).
+    const ok = decide({ mint: "M", at, scores: scores({ ...strong, momentum: 55 }), safety: safety(true), thresholds: { ...THRESHOLDS, maxMomentumForBuy: 70 } });
+    expect(["BUY_SMALL", "BUY_STRONG"]).toContain(ok.verdict);
   });
 
   it("AI hype alone cannot force a BUY (small weight by design)", () => {

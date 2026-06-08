@@ -27,21 +27,22 @@ function pos(over: Partial<Position> = {}): Position {
 
 describe("evaluateExit", () => {
   it("HOLDs below the first rung with no danger signals", () => {
-    const r = evaluateExit(pos({ peakPriceUsd: 1.5 }), { currentPriceUsd: 1.5, now: 1000 }, { maxHoldMs: MAX_HOLD });
+    // First early-harvest rung is now 1.4x; 1.3x is below it with no drop ⇒ HOLD.
+    const r = evaluateExit(pos({ peakPriceUsd: 1.3 }), { currentPriceUsd: 1.3, now: 1000 }, { maxHoldMs: MAX_HOLD });
     expect(r.signal.kind).toBe("HOLD");
   });
 
-  it("fires the 2x ladder rung as SELL_TRIM (~40%)", () => {
-    const r = evaluateExit(pos({ peakPriceUsd: 2 }), { currentPriceUsd: 2, now: 1000 }, { maxHoldMs: MAX_HOLD });
+  it("fires the first early-harvest rung as SELL_TRIM (~30% at 1.4x)", () => {
+    const r = evaluateExit(pos({ peakPriceUsd: 1.4 }), { currentPriceUsd: 1.4, now: 1000 }, { maxHoldMs: MAX_HOLD });
     expect(r.signal.kind).toBe("SELL_TRIM");
-    expect(r.signal.sellPct).toBeCloseTo(0.4, 2);
+    expect(r.signal.sellPct).toBeCloseTo(0.3, 2);
     expect(r.rungsHit).toEqual([0]);
   });
 
-  it("hits multiple rungs at once on a price jump (40+30+20%)", () => {
-    const r = evaluateExit(pos({ peakPriceUsd: 5 }), { currentPriceUsd: 5, now: 1000 }, { maxHoldMs: MAX_HOLD });
+  it("hits multiple early-harvest rungs at once on a jump to 2.5x (30+30+20%)", () => {
+    const r = evaluateExit(pos({ peakPriceUsd: 2.5 }), { currentPriceUsd: 2.5, now: 1000 }, { maxHoldMs: MAX_HOLD });
     expect(r.signal.kind).toBe("SELL_TRIM");
-    expect(r.signal.sellPct).toBeCloseTo(0.9, 2);
+    expect(r.signal.sellPct).toBeCloseTo(0.8, 2);
     expect(r.rungsHit).toEqual([0, 1, 2]);
   });
 

@@ -5,8 +5,10 @@ import type { PaperWalletState } from "../store/repositories/paperRepo.js";
 // unrealized is marked from each open position's last price vs its cost basis.
 
 export interface PaperStats {
-  balanceSol: number;
+  balanceSol: number; // CASH (free SOL, not locked in positions)
   startingBalanceSol: number;
+  openValueSol: number; // mark-to-market value of open positions
+  equitySol: number; // cash + openValue — the true account worth
   realizedPnlSol: number;
   unrealizedPnlSol: number;
   totalPnlSol: number;
@@ -18,18 +20,36 @@ export interface PaperStats {
   avgHoldMs: number;
 }
 
+/**
+ * GROUND-TRUTH accounting (Cycle 8 fix). The numbers are derived from the wallet's
+ * real cash balance + live position value, NOT the separately-recorded
+ * paper_trades.realized_pnl_sol ledger (which drifted out of sync with cash by a
+ * partial-sell cost-basis bug, so balance and PnL never reconciled on the dashboard).
+ * By construction here: equity = cash + openValue; total = equity − start;
+ * realized = total − unrealized — all three always reconcile to the real account.
+ * `realizedPnlSol` param is kept for signature compat but no longer trusted for totals.
+ */
 export function computePaperStats(
   wallet: PaperWalletState | undefined,
   open: Position[],
   closed: Position[],
-  realizedPnlSol: number,
+  _realizedLedgerSol: number,
 ): PaperStats {
-  let unrealizedPnlSol = 0;
+  const startingBalanceSol = wallet?.startingBalanceSol ?? 0;
+  const balanceSol = wallet?.balanceSol ?? 0;
+
+  let openCostSol = 0;
+  let openValueSol = 0;
   for (const p of open) {
-    if (p.lastPriceUsd && p.entryPriceUsd > 0) {
-      unrealizedPnlSol += (p.lastPriceUsd / p.entryPriceUsd - 1) * p.solInvested;
-    }
+    openCostSol += p.solInvested; // already reduced on partial sells (remaining cost basis)
+    const mult = p.lastPriceUsd && p.entryPriceUsd > 0 ? p.lastPriceUsd / p.entryPriceUsd : 1;
+    openValueSol += p.solInvested * mult; // current market value of the remaining tokens
   }
+
+  const equitySol = balanceSol + openValueSol;
+  const totalPnlSol = equitySol - startingBalanceSol;
+  const unrealizedPnlSol = openValueSol - openCostSol;
+  const realizedPnlSol = totalPnlSol - unrealizedPnlSol; // = (cash + openCost) − start; ties to real cash
 
   const wins = closed.filter((p) => p.realizedPnlUsd > 0).length;
   const holdMs = closed.filter((p) => p.closedAtMs).map((p) => (p.closedAtMs ?? 0) - p.entryAtMs);
@@ -38,11 +58,13 @@ export function computePaperStats(
     .map((p) => (p.lastPriceUsd! / p.entryPriceUsd - 1) * 100);
 
   return {
-    balanceSol: wallet?.balanceSol ?? 0,
-    startingBalanceSol: wallet?.startingBalanceSol ?? 0,
+    balanceSol,
+    startingBalanceSol,
+    openValueSol,
+    equitySol,
     realizedPnlSol,
     unrealizedPnlSol,
-    totalPnlSol: realizedPnlSol + unrealizedPnlSol,
+    totalPnlSol,
     openCount: open.length,
     closedCount: closed.length,
     winRate: closed.length ? wins / closed.length : 0,

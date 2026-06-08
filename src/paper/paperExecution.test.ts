@@ -58,7 +58,8 @@ describe("paper buy → exit-engine trim → sell cycle", () => {
     // Exit engine (the very same evaluateExit used for real alerts) fires a trim.
     const evalResult = evaluateExit(pos, { currentPriceUsd: 0.0025, now: 5000 }, { maxHoldMs: 60 * 60 * 1000 });
     expect(evalResult.signal.kind).toBe("SELL_TRIM");
-    expect(evalResult.signal.sellPct).toBeCloseTo(0.4, 2);
+    // Early-harvest ladder: 2.45x clears the 1.4x and 1.8x rungs ⇒ 30%+30% = 60%.
+    expect(evalResult.signal.sellPct).toBeCloseTo(0.6, 2);
 
     // Execute the simulated sell.
     const sellTokens = pos.tokenAmount * evalResult.signal.sellPct;
@@ -71,8 +72,8 @@ describe("paper buy → exit-engine trim → sell cycle", () => {
 
     expect(after.marked).toBe("reduced");
     expect(after.position!.status).toBe("PARTIAL");
-    expect(after.position!.tokenAmount).toBeCloseTo(buy.tokenAmount * 0.6, 2);
-    // Sold 40% bought at ~$0.00102 for ~$0.00245 → realized profit.
+    expect(after.position!.tokenAmount).toBeCloseTo(buy.tokenAmount * 0.4, 2);
+    // Sold 60% bought at ~$0.00102 for ~$0.00245 → realized profit.
     expect(after.position!.realizedPnlUsd).toBeGreaterThan(0);
     expect(wallet.balance()).toBeGreaterThan(9);
   });

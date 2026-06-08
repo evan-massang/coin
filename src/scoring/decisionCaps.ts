@@ -27,11 +27,23 @@ export interface DecisionThresholds {
   minConvictionBuySmall: number;
   minConvictionBuyStrong: number;
   maxLateEntryRisk: number;
+  /** Enforce the late-entry guard (return TOO_LATE) vs SHADOW (record + flag, no
+   *  block). Default true preserves legacy/test behavior; the live engine ships
+   *  SHADOW (false) until forward run-up→outcome data calibrates the threshold. */
+  lateEntryEnforce?: boolean;
   /** User's minimum organic score; below it (but ≥ WATCH band) soft-caps conviction. */
   minOrganicScore: number;
   /** Min momentum facet to allow a BUY (Cycle 7 audit edge: momentum≥85 ≈2× the 2x
    *  hit-rate). 0 = off. Below it, a would-be BUY is held to WATCH. */
   minMomentumForBuy?: number;
+  /** Momentum CEILING: hold a would-be BUY to WATCH when momentum ≥ this (0 = off).
+   *  Cycle-8: high momentum = chasing a spike; it is the dominant ANTI-predictive
+   *  driver of realized PnL (momentum<70 halves the per-trade loss in backtest). */
+  maxMomentumForBuy?: number;
+  /** Run-up CEILING: hold a would-be BUY to WATCH when the recorded 5m run-up
+   *  (scores.recentM5Pct) exceeds this % (0 = off). Cycle-8: realized PnL collapses
+   *  for already-popped coins (m5 25–75% → −16% realized vs −7% for 0–25%). */
+  maxEntryRunupM5Pct?: number;
   weights: ConvictionWeights;
 }
 
@@ -94,13 +106,22 @@ export function decide(input: DecisionInput): Decision {
     return mk("AVOID", Math.min(base, 25));
   }
 
-  // 3. LATE-ENTRY — hard verdict. Correct signal, but the entry is gone (§1.4).
+  // 3. LATE-ENTRY — hard verdict when ENFORCED. The guard's run-up input is now fed
+  //    the FREE DexScreener m5/h1 price change (historically it read the empty trade
+  //    buffer, so it never fired: 0/19k TOO_LATE, risk capped at 40 < 70). Default is
+  //    SHADOW (record + flag, do NOT block) until forward run-up→outcome data
+  //    calibrates the threshold — winners dip before they rip, so blocking blind
+  //    would repeat the refuted "exit-if-red" mistake.
   if (scores.lateEntryRisk > thresholds.maxLateEntryRisk) {
-    reasons.unshift(
-      `Too late: late-entry risk ${Math.round(scores.lateEntryRisk)} > ${thresholds.maxLateEntryRisk}`,
-    );
-    caps.push("lateEntry⇒TOO_LATE");
-    return mk("TOO_LATE", base);
+    if (thresholds.lateEntryEnforce ?? true) {
+      reasons.unshift(
+        `Too late: late-entry risk ${Math.round(scores.lateEntryRisk)} > ${thresholds.maxLateEntryRisk}`,
+      );
+      caps.push("lateEntry⇒TOO_LATE");
+      return mk("TOO_LATE", base);
+    }
+    flags.push("late-entry-shadow");
+    caps.push(`lateEntry ${Math.round(scores.lateEntryRisk)}>${thresholds.maxLateEntryRisk} (shadow — would block)`);
   }
 
   // 4–9. SCORE then CAP.
@@ -144,6 +165,30 @@ export function decide(input: DecisionInput): Decision {
     conviction = Math.min(conviction, thresholds.minConvictionBuySmall - 1);
     caps.push(`momentum ${Math.round(scores.momentum)}<${momFloor}⇒WATCH`);
     flags.push("low-momentum");
+  }
+
+  // Momentum CEILING (Cycle 8): a HOT momentum facet means we're chasing a spike
+  // that mean-reverts. Backtest on 1,239 resolved BUYs: momentum is the dominant
+  // ANTI-predictive driver of REALIZED PnL — momentum<70 ⇒ realized mid −8% vs −17%
+  // for all BUYs (pessimistic −12.5% vs −25.7%). Hold a would-be BUY to WATCH. The
+  // ceiling, when set, takes precedence over the (peak-oriented) floor. 0 = off.
+  const momCeil = thresholds.maxMomentumForBuy ?? 0;
+  if (momCeil > 0 && scores.momentum >= momCeil && conviction >= thresholds.minConvictionBuySmall) {
+    conviction = Math.min(conviction, thresholds.minConvictionBuySmall - 1);
+    caps.push(`momentum ${Math.round(scores.momentum)}≥${momCeil}⇒WATCH (chase)`);
+    flags.push("high-momentum-chase");
+  }
+
+  // Run-up CEILING (Cycle 8, calibrated on 2,760 resolved signals WITH recorded
+  // run-up): already-popped coins realize far worse — m5 25–75% → −16% realized vs
+  // −7% for 0–25%, and the near-breakeven band (−1.4%) is m5 ≤ 0. Hold a would-be
+  // BUY to WATCH when the recorded 5m run-up exceeds the ceiling. 0 = off.
+  const maxRunup = thresholds.maxEntryRunupM5Pct ?? 0;
+  const m5 = scores.recentM5Pct ?? 0;
+  if (maxRunup > 0 && m5 > maxRunup && conviction >= thresholds.minConvictionBuySmall) {
+    conviction = Math.min(conviction, thresholds.minConvictionBuySmall - 1);
+    caps.push(`run-up m5 ${Math.round(m5)}%>${maxRunup}⇒WATCH (chase)`);
+    flags.push("run-up-chase");
   }
 
   // Map capped conviction → verdict.

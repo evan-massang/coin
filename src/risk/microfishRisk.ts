@@ -38,7 +38,11 @@ export function computeRisk(ctx: RiskContext): RiskDecision {
   if (!isBuy) return none(`not a BUY verdict (${ctx.verdict})`);
 
   const m: RiskMultipliers = {
-    safety: ctx.unknownCount >= 2 ? 0.35 : clamp(0.6 + (ctx.scores.safety / 100) * 0.5, 0.6, 1.1),
+    // Structural-unknowns are PERMANENT on the free feed (mint/freeze authority are
+    // curve-held, never resolvable) — Cycle-7 established they don't indicate real
+    // risk and the safety GATE already blocks confirmed-bad. So a mild ×0.85, not a
+    // 65% cut (which pinned every BUY at the floor even when the strategy is good).
+    safety: ctx.unknownCount >= 2 ? 0.85 : clamp(0.6 + (ctx.scores.safety / 100) * 0.5, 0.6, 1.1),
     liquidity: liquidityMult(ctx.liquidityUsd, ctx.minLiquidityUsd),
     organic: band(ctx.scores.organic, [70, 1.2], [55, 1.0], [45, 0.7], 0.4),
     momentum: band(ctx.scores.momentum, [80, 1.3], [60, 1.1], [40, 0.9], 0.6),
@@ -50,7 +54,7 @@ export function computeRisk(ctx: RiskContext): RiskDecision {
 
   const scamMemory = ctx.scamMemoryMultiplier ?? 1;
 
-  if (ctx.unknownCount >= 2) reasons.push("safety unknowns ⇒ ×0.35");
+  if (ctx.unknownCount >= 2) reasons.push("safety unknowns (structural) ⇒ ×0.85");
   if (m.liquidity < 0.8) reasons.push("thin/unknown liquidity");
   if (m.marketWeather < 0.9) reasons.push("market risk-off");
   if (m.sourceAgreement < 0.9) reasons.push("source conflict");
@@ -80,11 +84,14 @@ export function computeRisk(ctx: RiskContext): RiskDecision {
 }
 
 function liquidityMult(usd: number | undefined, min: number): number {
-  if (usd === undefined) return 0.8; // unknown — slight caution
+  // pump.fun bonding-curve tokens report liquidity=$0/undefined on DexScreener
+  // (liquidity lives in the curve PDA, not a pool) — structural, NOT a risk signal.
+  // Treat it as near-neutral so it doesn't suppress the engine's entire universe.
+  if (usd === undefined || usd === 0) return 0.95;
   if (usd >= 50_000) return 1.2;
   if (usd >= 10_000) return 1.0;
   if (usd >= min) return 0.8;
-  return 0.4;
+  return 0.4; // KNOWN low (but non-zero) liquidity — genuinely thin
 }
 
 function timeDecayMult(lateEntryRisk: number): number {

@@ -2,6 +2,7 @@ import open from "open";
 import { createServices } from "./services.js";
 import { startServer } from "./dashboard/server.js";
 import { PumpPortalClient } from "./sources/pumpPortal.js";
+import { DexScanner } from "./sources/dexScanner.js";
 import { EntryPipeline } from "./engine/entry.js";
 import { WalletObserver } from "./wallet/walletObserver.js";
 import { ExitEngine } from "./engine/exitEngine.js";
@@ -28,6 +29,7 @@ async function main(): Promise<void> {
   // Live Signal mode: new-token scanner + Stage-0 gate. Guarded so the dashboard
   // can run standalone (NO_ENGINE=1). Phase 3 attaches the observe→score hook.
   let entry: EntryPipeline | undefined;
+  let scanner: DexScanner | undefined;
   let observer: WalletObserver | undefined;
   let walletExits: ExitEngine | undefined;
   let paperExits: ExitEngine | undefined;
@@ -44,6 +46,24 @@ async function main(): Promise<void> {
       hooks: { onDecision: (decision) => void paper.onDecision(decision) },
     });
     entry.start();
+
+    // Maturing-survivor scanner (Cycle 8 "Golden Filter") — feeds GRADUATED coins
+    // (real liquidity, RugCheck-resolvable) into the SAME observe→score pipeline.
+    // Off by default; ships shadow (journals candidates, no paper buy) for A/B.
+    if (svc.settings.get("scanEnabled")) {
+      scanner = new DexScanner(
+        () => ({
+          minMcapUsd: svc.settings.get("scanMinMcapUsd"),
+          maxMcapUsd: svc.settings.get("scanMaxMcapUsd"),
+          minLiqUsd: svc.settings.get("scanMinLiqUsd"),
+          minVolMcRatio: svc.settings.get("scanMinVolMcRatio"),
+          maxAgeHours: svc.settings.get("scanMaxAgeHours"),
+        }),
+        svc.settings.get("scanIntervalSec") * 1000,
+      );
+      scanner.on((t) => entry!.injectToken(t));
+      scanner.start();
+    }
 
     paperExits = new ExitEngine(svc, {
       source: "paper",
@@ -98,6 +118,7 @@ async function main(): Promise<void> {
     log.info(`received ${sig}, shutting down`);
     try {
       entry?.stop();
+      scanner?.stop();
       observer?.stop();
       walletExits?.stop();
       paperExits?.stop();

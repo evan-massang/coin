@@ -1,0 +1,13 @@
+import Database from 'better-sqlite3';
+const db = new Database('data/sniper.sqlite', { readonly: true, fileMustExist: true });
+type Row = { price_at_alert:number|null; price_15m:number|null };
+const rows = db.prepare(`SELECT price_at_alert, price_15m FROM signals WHERE verdict IN ('BUY_SMALL','BUY_STRONG')`).all() as Row[];
+const valid = rows.filter(r=>r.price_at_alert!=null&&r.price_at_alert>0&&r.price_15m!=null);
+const rets = valid.map(r=> (r.price_15m! - r.price_at_alert!)/r.price_at_alert!);
+console.log('valid 15m n =', valid.length);
+console.log('ret <= 0      :', rets.filter(x=>x<=0).length);
+console.log('ret <  0      :', rets.filter(x=>x<0).length);
+console.log('ret == 0      :', rets.filter(x=>x===0).length);
+console.log('ret >  0      :', rets.filter(x=>x>0).length);
+console.log('within [-0.005,0.005] near-zero:', rets.filter(x=>Math.abs(x)<=0.005).length);
+db.close();

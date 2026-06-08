@@ -317,6 +317,20 @@ function coinImg(mint) {
 }
 function hms(ms) { const d = new Date(ms); return d.toISOString().slice(11, 16); }
 
+// Catmull-Rom → bezier: turn sparse PnL points into a natural smooth curve.
+// Caller does beginPath()/stroke(); this only emits the path.
+function smoothStroke(ctx, P) {
+  if (P.length === 0) return;
+  ctx.moveTo(P[0].x, P[0].y);
+  if (P.length < 3) { for (let i = 1; i < P.length; i++) ctx.lineTo(P[i].x, P[i].y); return; }
+  for (let i = 0; i < P.length - 1; i++) {
+    const p0 = P[i - 1] || P[i], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2] || P[i + 1];
+    const cp1x = p1.x + (p2.x - p0.x) / 6, cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6, cp2y = p2.y - (p3.y - p1.y) / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+  }
+}
+
 let pchartCv;
 function drawProfitChart() {
   if (!pchartCv) { pchartCv = $("#pchart"); setupChartInput(pchartCv); }
@@ -358,22 +372,63 @@ function drawProfitChart() {
     ctx.fillStyle = COL.muted; ctx.fillText(hms(t), xx, padT + plotH + 5);
   }
 
-  // clip to plot, draw each position's profit line
+  // clip to plot
   ctx.save(); ctx.beginPath(); ctx.rect(padL, padT, plotW, plotH); ctx.clip();
+
+  // Individual positions — faint SMOOTHED context lines (fainter as they crowd, so
+  // 100+ trades never become spaghetti). The aggregate below is the hero.
   const heads = [];
+  const nPos = positions.length;
+  const indivA = nPos > 60 ? 0.13 : nPos > 25 ? 0.24 : 0.5;
   for (const p of positions) {
     const pts = p.points.filter((pt) => pt.t >= viewStart - CHART.viewMs && pt.t <= viewEnd + 1000);
     if (pts.length === 0) continue;
     const up = (p.curPnl ?? 0) >= 0;
     const col = up ? COL.green : COL.red;
-    ctx.strokeStyle = col; ctx.lineWidth = p.status === "OPEN" || p.status === "PARTIAL" ? 2 : 1.2;
-    ctx.globalAlpha = p.closedAtMs ? 0.5 : 1;
-    ctx.beginPath();
-    pts.forEach((pt, idx) => { const xx = X(pt.t), yy = Y(pt.pnl); idx ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); });
-    ctx.stroke();
+    const P = pts.map((pt) => ({ x: X(pt.t), y: Y(pt.pnl) }));
+    ctx.strokeStyle = col;
+    ctx.lineWidth = p.status === "OPEN" || p.status === "PARTIAL" ? 1.6 : 1;
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.globalAlpha = (p.closedAtMs ? 0.6 : 1) * indivA;
+    ctx.beginPath(); smoothStroke(ctx, P); ctx.stroke();
     ctx.globalAlpha = 1;
     const last = pts[pts.length - 1];
     if (last.t >= viewStart && last.t <= viewEnd) heads.push({ p, x: X(last.t), y: Y(last.pnl), col });
+  }
+
+  // AGGREGATE hero: average PnL of positions LIVE at each sampled time — smoothed,
+  // with a green-above / red-below gradient area fill to the 0 baseline. The
+  // "how are my trades doing overall" line the dashboard was missing.
+  const N = 64, avg = [];
+  for (let k = 0; k <= N; k++) {
+    const t = viewStart + (k / N) * CHART.viewMs;
+    let sum = 0, cnt = 0;
+    for (const p of positions) {
+      const pp = p.points; if (!pp.length || pp[0].t > t) continue;
+      if (p.closedAtMs && p.closedAtMs < t) continue;
+      let v = null; for (let i = 0; i < pp.length; i++) { if (pp[i].t <= t) v = pp[i].pnl; else break; }
+      if (v != null) { sum += v; cnt++; }
+    }
+    if (cnt > 0) avg.push({ x: X(t), y: Y(sum / cnt), v: sum / cnt });
+  }
+  if (avg.length >= 2) {
+    const last = avg[avg.length - 1];
+    const base = Y(0);
+    const zf = Math.max(0.001, Math.min(0.999, (base - padT) / plotH));
+    const g = ctx.createLinearGradient(0, padT, 0, padT + plotH);
+    g.addColorStop(0, "rgba(47,143,78,0.26)");
+    g.addColorStop(zf, "rgba(47,143,78,0.03)");
+    g.addColorStop(Math.min(0.999, zf + 0.001), "rgba(207,75,65,0.03)");
+    g.addColorStop(1, "rgba(207,75,65,0.26)");
+    ctx.beginPath(); smoothStroke(ctx, avg);
+    ctx.lineTo(last.x, base); ctx.lineTo(avg[0].x, base); ctx.closePath();
+    ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); smoothStroke(ctx, avg);
+    ctx.strokeStyle = COL.ink; ctx.lineWidth = 2.4; ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.shadowColor = "rgba(33,36,29,0.22)"; ctx.shadowBlur = 6; ctx.stroke(); ctx.shadowBlur = 0;
+    const heroUp = last.v >= 0;
+    ctx.beginPath(); ctx.arc(last.x, last.y, 4.5, 0, 7); ctx.fillStyle = heroUp ? COL.greenB : COL.red; ctx.fill();
+    ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.arc(last.x, last.y, 9, 0, 7); ctx.strokeStyle = heroUp ? COL.greenB : COL.red; ctx.lineWidth = 1.5; ctx.stroke(); ctx.globalAlpha = 1;
   }
   ctx.restore();
 
@@ -451,10 +506,16 @@ async function renderPaper() {
   off.style.display = "none"; body.style.display = "block";
   const st = p.stats || {}, w = p.wallet || {};
   const bal = st.balanceSol ?? w.balanceSol ?? 0;
+  const openVal = st.openValueSol ?? 0;
+  const equity = st.equitySol ?? (bal + openVal);
+  const start = st.startingBalanceSol ?? p.startingBalanceSol ?? 0;
   $("#pw-status").innerHTML = `<span class="green">● ACTIVE</span>`;
-  $("#pw-bal").innerHTML = `${bal.toFixed(3)} <span class="muted small">/ ${p.startingBalanceSol || 0}</span>`;
+  // Headline = EQUITY (cash + open positions) so "cash < start" reads as locked
+  // capital, not a loss. Breakdown reconciles: equity = cash + open value.
+  $("#pw-bal").innerHTML = `${equity.toFixed(2)} <span class="muted small">SOL equity / ${start} start</span><br><span class="muted small">${bal.toFixed(2)} cash + ${openVal.toFixed(2)} in ${st.openCount ?? 0} open</span>`;
   const pnl = st.totalPnlSol ?? 0;
-  $("#pw-pnl").innerHTML = `<span class="${pnl >= 0 ? "green" : "red"}">${pnl >= 0 ? "+" : ""}${pnl.toFixed(3)}</span> <span class="muted small">SOL</span>`;
+  const rz = st.realizedPnlSol ?? 0, ur = st.unrealizedPnlSol ?? 0;
+  $("#pw-pnl").innerHTML = `<span class="${pnl >= 0 ? "green" : "red"}">${pnl >= 0 ? "+" : ""}${pnl.toFixed(3)}</span> <span class="muted small">SOL total</span><br><span class="muted small">realized ${rz >= 0 ? "+" : ""}${rz.toFixed(2)} · unreal ${ur >= 0 ? "+" : ""}${ur.toFixed(2)}</span>`;
   $("#pw-win").textContent = `${Math.round((st.winRate ?? 0) * 100)}%`;
   $("#pw-open").textContent = st.openCount ?? (p.open || []).length;
   $("#pw-closed").textContent = st.closedCount ?? (p.closed || []).length;

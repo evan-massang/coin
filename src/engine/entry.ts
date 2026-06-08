@@ -112,6 +112,13 @@ export class EntryPipeline {
     this.pump.stop();
   }
 
+  /** Inject a token discovered by an ALTERNATE source (the DexScreener
+   *  maturing-survivor scanner) into the same observe→score pipeline. The token
+   *  carries discoverySource:"scan" so the decision is tagged + (in shadow) not bought. */
+  injectToken(token: NewToken): void {
+    void this.handleNewToken(token);
+  }
+
   private prune(): void {
     this.sm.prune();
     // Drop buffers + free watch slots for tokens we no longer track.
@@ -273,24 +280,33 @@ export class EntryPipeline {
     });
     tracked.stage1 = stage1;
 
-    const late = lateEntryRisk({
-      priceGainPctSinceFirstSeen: priceGainPct,
-      bondingCurveProgress: gradData?.progress ?? 0,
-      buyerVelocityTrend: momData?.buyerVelocityTrend ?? 0,
-      pullbackSeen: detectPullback(mcaps),
-    });
-
     // Cycle 4: the PumpPortal per-trade stream is a PAID feature the engine doesn't
     // buy (0.01 SOL/10k events), so the trade buffer is empty and organic/momentum
     // are blind. Derive them for FREE from DexScreener's rolling 5m buy/sell + price
     // aggregates — and because that window is DexScreener's own, observing longer
-    // does NOT deflate it (unlike now−start trade-stream momentum).
+    // does NOT deflate it (unlike now−start trade-stream momentum). Fetched BEFORE
+    // late-entry so the guard sees the REAL run-up (m5/h1), not the empty buffer.
     let dexSnap: MarketSnapshot | undefined;
     if (s.dexFallbackEnabled && this.dexLimiter.tryAcquire()) {
       dexSnap = await fetchDexSnapshot(token.mint).catch(() => undefined);
       if (dexSnap) this.svc.tokens.saveSnapshot(dexSnap);
     }
     const dex = dexSignals(dexSnap, s.minBuysToDecide);
+
+    // Late-entry "don't chase" guard. Its run-up input was historically the trade
+    // buffer's marketCap delta — empty on the free feed, so the guard NEVER fired
+    // (0/19k TOO_LATE; risk capped at 40 < 70 threshold). Now ALSO fed DexScreener
+    // m5/h1 price change so it can see a coin that already ran. SHADOW by default
+    // (records the risk + flags "would block", does not change the verdict) until
+    // forward run-up→outcome data calibrates the threshold (see lateEntryEnforce).
+    const late = lateEntryRisk({
+      priceGainPctSinceFirstSeen: priceGainPct,
+      bondingCurveProgress: gradData?.progress ?? 0,
+      buyerVelocityTrend: momData?.buyerVelocityTrend ?? 0,
+      pullbackSeen: detectPullback(mcaps),
+      recentPriceChangeM5Pct: dexSnap?.priceChange?.m5,
+      recentPriceChangeH1Pct: dexSnap?.priceChange?.h1,
+    });
 
     const scores: ScoreBreakdown = {
       safety: stage1.score,
@@ -302,6 +318,9 @@ export class EntryPipeline {
       social: scoreOf(results, "social"),
       hype: scoreOf(results, "hype"), // AI narrative — confirmation only (small weight)
       lateEntryRisk: late.risk,
+      // Decision-time run-up context (observability + iteration-2 calibration data).
+      recentM5Pct: dexSnap?.priceChange?.m5,
+      recentH1Pct: dexSnap?.priceChange?.h1,
     };
 
     const reasons = [
@@ -315,6 +334,7 @@ export class EntryPipeline {
     if (bundle.detected) flags.push("bundle");
     if (devSold) flags.push("dev-sold");
     if (hypeData?.isRevival) flags.push("revival");
+    if (tracked.token.discoverySource === "scan") flags.push("src:scan"); // maturing-survivor scanner (A/B + shadow)
 
     // Per-facet confidence: unknown agents (couldn't compute) are dropped from the
     // conviction blend rather than anchoring it at a frozen default (Cycle 1 fix).

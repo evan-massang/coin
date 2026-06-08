@@ -1,0 +1,160 @@
+==============================================================================
+  COIN AI — HOW IT WORKS  (plain-language guide)
+  Written for the operator (kingevan091).  Last updated: 2026-06-08.
+==============================================================================
+
+This file explains two things:
+  PART A — How *I* (the AI) work: the loop I run to keep improving the engine.
+  PART B — How the *engine* itself works: find a coin -> decide -> exit.
+  PART C — What I changed this session, and the honest state of profitability.
+
+Read it top to bottom; no code knowledge needed.
+
+
+==============================================================================
+  PART A — HOW I WORK (the improvement loop)
+==============================================================================
+
+I'm not just "writing code." I run a continuous research loop, like a quant
+research department. The loop is:
+
+   1. OBSERVE      Look at the real running system + the database of past trades.
+   2. MEASURE      Pull hard numbers (never guess). "72% of buys are red in 5 min."
+   3. HYPOTHESIZE  Form a theory about WHY. "We're buying coins that already ran."
+   4. EXPERIMENT   Backtest the fix on recorded data, OR run it in "shadow" first.
+   5. IMPLEMENT    Ship the change — gated/off-by-default or shadow when risky.
+   6. VERIFY       Watch it in the REAL running app. Screenshots, DB, live logs.
+   7. KEEP/REVERT  If the measured result improves, keep it. If not, revert.
+   8. RE-AUDIT     Ask "what's the next biggest bottleneck?" -> back to step 1.
+
+It never really "finishes." There's no stop condition except you telling me to
+stop. After every fix I look for the next highest-impact problem.
+
+THE RULES I HOLD MYSELF TO (this is the important part):
+
+  * EVIDENCE, NOT VIBES. I only say "Verified" when I've actually observed it in
+    the running product (a number in your DB, a screenshot, a live log line). If
+    I haven't proven it, I say "Not Verified." I never say "should work."
+
+  * I WON'T FOOL YOU. The worst outcome isn't "we couldn't make it profitable" —
+    it's me telling you it's profitable when it isn't. So I keep telling you the
+    parts that DON'T work yet. If a change is still losing, I say so.
+
+  * FALSIFIABLE CLAIMS. When I ship something, I attach a number it has to beat,
+    and I commit to reverting if it doesn't. BS can't be tested; my claims can.
+
+  * MEASURE BEFORE BELIEVING. Example: a teammate-style idea "sell if it's red at
+    15 min" sounded smart, but when I tested it on real data it was WORSE (it cut
+    the dip-then-rip winners). So I did NOT ship it. Intuition gets tested.
+
+  * SAFETY IS FIXED, NOT NEGOTIABLE. The engine NEVER holds a private key, never
+    signs, never auto-executes a real trade. It produces SIGNALS. You trade for
+    real manually; "paper trading" is just a fake-wallet simulator to test the
+    exact same logic safely. And I never lower the BUY conviction gate (a past
+    replay proved a loose gate lost ~136 SOL).
+
+HOW YOU SEE THE LOOP RUNNING:
+  - The engine runs in the background, scoring coins and paper-trading.
+  - I write little read-only "probe" scripts (in scripts/research/) that query
+    your database and print the truth. You can run any of them yourself.
+  - The dashboard (http://127.0.0.1:3000) shows live decisions, paper PnL, the
+    reasoning feed, and the Profit x Time chart.
+
+
+==============================================================================
+  PART B — HOW THE ENGINE WORKS (find -> decide -> exit)
+==============================================================================
+
+STEP 1: FIND A COIN (discovery)
+  - Original source: it listens to pump.fun and sees brand-new coins the second
+    they're born (free feed).
+  - NEW this session: a "maturing-survivor" scanner that watches DexScreener +
+    GeckoTerminal for coins that already GRADUATED (have a real trading pool,
+    enough liquidity, recent, active). The idea: a 1-hour-old coin with real
+    data is a far better bet than a 5-second-old one we're blind on.
+
+STEP 2: OBSERVE (~90 seconds)
+  - It watches the coin for a bit, pulling free DexScreener data (price moves,
+    buy/sell counts, volume).
+
+STEP 3: SAFETY GATE (hard kill)
+  - Checks for rug signals: can the dev mint more supply? freeze your tokens?
+    is one wallet holding most of it? is it a honeypot (can't sell)?
+  - If it's clearly bad -> AVOID, full stop. Nothing overrides safety.
+
+STEP 4: SCORE -> CONVICTION (0-100)
+  - Several "facets" each give a score: organic volume, momentum, graduation,
+    smart-money, social/hype, etc. They're blended into one conviction number.
+  - Gates/caps apply: too little real evidence -> capped to "WATCH" only.
+
+STEP 5: VERDICT
+  - conviction >= 55 -> BUY_SMALL ;  >= 72 -> BUY_STRONG ;  else WATCH or AVOID.
+  - There's also a "don't chase" check: if the coin already ran up a lot, hold off.
+
+STEP 6: SIZE (MiroFish risk engine)
+  - Decides how big the (paper) position should be, based on conviction, safety,
+    liquidity, and "market weather" (is the engine winning lately?). If the
+    engine is losing, it shrinks every bet to a floor — a safety brake.
+
+STEP 7: EXIT (this is 80% of the game)
+  - Profit ladder: take some off as it rises (e.g. 1.4x, 1.8x, 2.5x...).
+  - Trailing stop: lock in gains once it's up, sell if it falls back from the peak.
+  - Stop-loss: cut a loser fast.
+  - Time stop: don't hold forever.
+
+
+==============================================================================
+  PART C — WHAT I FOUND & CHANGED THIS SESSION + HONEST STATE
+==============================================================================
+
+THE CORE PROBLEM I PROVED (with your own data, ~19k signals):
+  - The engine was BUYING TOPS. The typical buy was a coin already up ~70%
+    (median), and 72% of buys were underwater within 5 minutes.
+  - 100% of coins that eventually doubled had first crashed 45%+ — so the
+    "stop-loss" sold them before they could moon. We were optimizing a target
+    (peak price) the exit could never actually capture.
+  - The "don't chase" guard existed but had NEVER fired once in 19,000 decisions,
+    because it was reading an empty data feed.
+  - The position sizer (MiroFish) was pinned at its tiny floor — partly CORRECT
+    (it detected we were losing and protected the wallet), partly a bug (it
+    punished coins for missing data that's structurally unavailable on newborns).
+
+WHAT I SHIPPED (all tested, most verified live):
+  1. Instrumented entry timing + a "don't chase" guard fed REAL run-up data.
+  2. Reshaped momentum so it stops rewarding already-pumped spikes.
+  3. Better exit ladder (harvest earlier) + tighter stop — backtested less-bad.
+  4. Fixed MiroFish's structural penalties so sizing works on mature coins.
+  5. Fixed the paper PnL display so balance + PnL actually reconcile to equity
+     (it was showing inconsistent numbers before).
+  6. Built the maturing-survivor scanner (running now in SHADOW: it journals
+     candidates but doesn't paper-buy them yet, so we can prove they're better
+     BEFORE risking on them).
+
+THE HONEST STATE:
+  - It is NOT profitable yet. On the old "buy newborns" population, NO exit or
+    selection tweak makes it positive — the best is still ~-8% per trade. The
+    real fix is to stop being LATE.
+  - The research (and your own instinct) agree: meme money comes from catching a
+    pump EARLY and riding winners, not chasing late ones. The maturing-survivor
+    scanner + (next) free browser research are the path to better, earlier picks.
+  - The free DexScreener feed is ~5 minutes late by nature. Getting genuinely
+    early may eventually need either smart-money wallet-following or a paid
+    real-time feed — I'll quantify that before ever recommending you spend.
+
+WHAT'S NEXT (planned):
+  - Free "internet diving": a real browser (Playwright) searches X/Google for a
+    shortlisted coin to judge if the hype is organic humans vs bots, and whether
+    the meme is real outside crypto. Free; Claude judges it cheaply if a key is set.
+  - Wire the exit "divergence" signals (liquidity trap, holder stagnation).
+  - Once the scanner's shadow data proves the maturing-survivor coins are better,
+    flip it from shadow to live and measure realized PnL.
+
+HOW TO CHECK ME (don't trust — verify):
+  - npm test            -> the test suite (should be all green).
+  - npx tsx scripts/research/_audit_lateguard.ts      -> the "buying tops" proof.
+  - npx tsx scripts/research/_audit_paperacct.ts       -> paper PnL reconciliation.
+  - npx tsx scripts/research/_audit_scantest.ts        -> the scanner's live picks.
+  - Open http://127.0.0.1:3000                          -> the live dashboard.
+  - PROFITABILITY_ROADMAP.md                            -> the ranked to-do list.
+
+==============================================================================

@@ -27,9 +27,17 @@ export const SettingsSchema = z.object({
   maxTopHolderPct: z.number().min(0).max(100).default(25),
   minOrganicScore: z.number().min(0).max(100).default(55),
   maxLateEntryRisk: z.number().min(0).max(100).default(70),
+  /** Enforce the late-entry guard (block as TOO_LATE) vs SHADOW (record + flag only).
+   *  Default SHADOW: the guard is now fed real DexScreener run-up (m5/h1), but we
+   *  measure run-up→outcome before blocking trades — winners dip before they rip,
+   *  so blocking blind would repeat the refuted "exit-if-red-at-15m" mistake. */
+  lateEntryEnforce: z.boolean().default(false),
   maxHoldMinutes: z.number().min(1).default(240),
-  /** Cut a position this far below entry (meme coins die fast). 0 disables. */
-  stopLossPct: z.number().min(0).max(0.9).default(0.45),
+  /** Cut a position this far below entry (meme coins die fast). 0 disables.
+   *  Cycle 8: 0.45→0.40. Backtest (1,229 BUYs): a slightly tighter stop paired with
+   *  the early-harvest ladder reduces the loser bleed on both ordering bounds without
+   *  losing winners (100% of 2x-winners breach −45% anyway). Reversible setting. */
+  stopLossPct: z.number().min(0).max(0.9).default(0.4),
   minLiquidityUsd: z.number().min(0).default(3000),
 
   // ── Paper trading (Mode 3 — simulation only) ──
@@ -66,6 +74,24 @@ export const SettingsSchema = z.object({
    *  PumpPortal per-trade stream is a paid feature. The real trade-flow source. */
   dexFallbackEnabled: z.boolean().default(true),
 
+  // ── Maturing-survivor scanner (Cycle 8 — the operator's "Golden Filter") ──
+  /** Scan DexScreener boosts/profiles for GRADUATED coins (real Raydium pool ⇒
+   *  reliable price/liquidity + RugCheck/authorities resolve ⇒ safety+sizing work)
+   *  instead of only blind seconds-old newborns. Off by default. */
+  scanEnabled: z.boolean().default(true),
+  /** Journal scanner candidates but do NOT paper-buy them — A/B their forward
+   *  outcomes vs the newborn feed before trading them. Default true (shadow). */
+  scanShadowOnly: z.boolean().default(true),
+  scanMinMcapUsd: z.number().min(0).default(50_000),
+  scanMaxMcapUsd: z.number().min(0).default(200_000),
+  /** Min pool liquidity. Operator's spec was $30k, but live data showed pump.fun
+   *  graduates with only ~$12–17k LP so $30k matched nothing — set to $15k to match
+   *  graduation reality; the shadow journal will inform final tuning. */
+  scanMinLiqUsd: z.number().min(0).default(15_000),
+  scanMinVolMcRatio: z.number().min(0).default(2),
+  scanMaxAgeHours: z.number().min(0).default(6),
+  scanIntervalSec: z.number().int().min(30).max(1800).default(120),
+
   // ── Evidence sufficiency (Cycle 1 fix — NOT auto-tunable; structural safety) ──
   /** Min observed trades before organic/momentum carry confidence. Floored at 8. */
   minBuysToDecide: z.number().int().min(8).max(50).default(8),
@@ -79,6 +105,20 @@ export const SettingsSchema = z.object({
    *  pending ≥1 week of multi-regime data (the audit's sample was one 3.7h window);
    *  set to 85 in CONFIG to enable the selection edge. */
   minMomentumForBuy: z.number().min(0).max(100).default(0),
+  /** Momentum CEILING for a BUY (0 = off). Cycle-8 backtest on 1,239 resolved BUYs:
+   *  momentum is the dominant ANTI-predictive driver of REALIZED PnL — filtering to
+   *  momentum<70 halves the per-trade loss (realized mid −17%→−8%, pess −25.7%→−12.5%).
+   *  A hot momentum facet means we're chasing a spike that mean-reverts. Default 70
+   *  (ON) — reversible; measured forward against the −5.66 SOL baseline. */
+  /** Superseded by the Cycle-8 momentum RESHAPE (dexMomentum now scores the early/dip
+   *  sweet-spot high and chases low), which made a "high momentum = chase" ceiling
+   *  contradictory. Default 0 (off); the run-up gate below is the chase backstop. */
+  maxMomentumForBuy: z.number().min(0).max(100).default(0),
+  /** Max recent 5-minute run-up (DexScreener priceChange.m5 %) to allow a BUY; above
+   *  it we're chasing a coin that already popped. 0 = off. Cycle-8 calibration on
+   *  2,760 resolved signals with recorded run-up: realized PnL is −7% for m5 0–25%
+   *  but −16% for m5 25–75%. Default 30 (block the clear chase zone). Reversible. */
+  maxEntryRunupM5Pct: z.number().min(0).max(2000).default(30),
   /** Facets below this confidence are dropped from the conviction blend. Floored at 0.5. */
   convictionConfidenceFloor: z.number().min(0.5).max(0.95).default(0.5),
   /** If real-evidence coverage (excl. social/hype) is below this, conviction is capped to WATCH. */

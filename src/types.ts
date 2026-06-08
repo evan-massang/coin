@@ -39,6 +39,9 @@ export interface NewToken {
   marketCapSol?: number;
   pool?: string;
   seenAt: number;
+  /** Which discovery source surfaced this token. "pump" = pump.fun newborn feed
+   *  (default); "scan" = DexScreener maturing-survivor Golden-Filter scanner. */
+  discoverySource?: "pump" | "scan";
 }
 
 /** A single on-chain trade event (token trade stream or wallet trade stream). */
@@ -129,6 +132,10 @@ export interface ScoreBreakdown {
   hype: number;
   /** Higher = later/worse entry. >threshold ⇒ TOO_LATE. */
   lateEntryRisk: number;
+  /** Decision-time DexScreener 5-minute price change % (entry-timing observability). */
+  recentM5Pct?: number;
+  /** Decision-time DexScreener 1-hour price change % (entry-timing observability). */
+  recentH1Pct?: number;
 }
 
 export function emptyScores(): ScoreBreakdown {

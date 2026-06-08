@@ -18,15 +18,21 @@ import { log } from "../util/logger.js";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function buildDefaultLadder(): LadderRung[] {
+  // EARLY-HARVEST ladder (Cycle 8). The old [2x/3x/5x] ladder harvested NOTHING
+  // below 2x — an 86% "dead zone" where coins that popped +40–80% round-tripped to
+  // a loss. Backtest on 1,229 recorded BUYs (exitOutcomeBounds): capturing the
+  // common sub-2x pops lifts win-rate 13.6%→15.3% and mean realized PnL/trade
+  // −19.0%→−17.1% (Pareto-better on both ordering bounds). 10% runner kept.
   return [
-    { multiple: 2, sellPct: 0.4, done: false },
-    { multiple: 3, sellPct: 0.3, done: false },
-    { multiple: 5, sellPct: 0.2, done: false },
+    { multiple: 1.4, sellPct: 0.3, done: false },
+    { multiple: 1.8, sellPct: 0.3, done: false },
+    { multiple: 2.5, sellPct: 0.2, done: false },
+    { multiple: 5, sellPct: 0.1, done: false },
     // remaining 10% is the runner, managed by the trailing stop
   ];
 }
 
-export function defaultExitPlan(maxHoldMs: number, trailingStopPct = 0.35): ExitPlan {
+export function defaultExitPlan(maxHoldMs: number, trailingStopPct = 0.3): ExitPlan {
   return { ladder: buildDefaultLadder(), trailingStopPct, maxHoldMs };
 }
 
@@ -93,9 +99,11 @@ export function evaluateExit(p: Position, inp: ExitInputs, cfg: { maxHoldMs: num
     return hold("SELL_EXIT_NOW", 1, `Stop loss: ${Math.round((1 - multiple) * 100)}% below entry`, false);
   }
 
-  // 3. TRAILING STOP (only meaningful once in profit).
-  const effectiveStop = (p.exitPlan.trailingStopPct || 0.35) * (1 + (inp.volatility ?? 0) * 0.5);
-  if (multiple >= 1.5 && dropFromPeak >= effectiveStop) {
+  // 3. TRAILING STOP (only meaningful once in profit). Activates at 1.25x (was
+  //    1.5x — too late: it let runners that popped to 1.3–1.5x round-trip past the
+  //    early ladder back to a loss before locking anything).
+  const effectiveStop = (p.exitPlan.trailingStopPct || 0.3) * (1 + (inp.volatility ?? 0) * 0.5);
+  if (multiple >= 1.25 && dropFromPeak >= effectiveStop) {
     return hold(
       "SELL_EXIT_NOW",
       1,

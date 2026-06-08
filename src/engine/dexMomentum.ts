@@ -38,9 +38,13 @@ export function dexSignals(snap: MarketSnapshot | undefined, minTxns = 8): DexSi
   // organic = buy share of recent txns (50/50 ⇒ 50; one-sided dump ⇒ low).
   const organic = total > 0 ? Math.round(clamp((buys / total) * 120 - 10)) : 0;
 
-  // momentum = recent txn velocity + price action + volume.
-  let momentum = Math.min(45, total * 1.5); // ~30 txns/5m ⇒ 45
-  momentum += pc5 >= 20 ? 30 : pc5 >= 5 ? 18 : pc5 >= 0 ? 8 : -12;
+  // momentum = recent txn velocity + ENTRY-TIMING shape + volume.
+  let momentum = Math.min(45, total * 1.5); // ~30 txns/5m ⇒ 45 ("is it alive")
+  // Cycle-8 PIVOT: the old code REWARDED a high 5m run-up (+30 for pc5≥20) — i.e. it
+  // chased spikes. Verified on 2,835 resolved signals: realized PnL is −1.6% entering
+  // a dip (m5∈[-25,-3]) / −2.2% flat, but −16% chasing (m5 25–75%). So reward the
+  // early/flat/dip sweet-spot and PENALISE chasing a pumped coin or catching a knife.
+  momentum += pc5 <= -40 ? -22 : pc5 <= -3 ? 14 : pc5 <= 12 ? 20 : pc5 <= 30 ? 6 : pc5 <= 75 ? -14 : -24;
   momentum += vol5 >= 5000 ? 15 : vol5 >= 1000 ? 8 : 0;
 
   return { organic, momentum: Math.round(clamp(momentum)), confident, txns5m: total };

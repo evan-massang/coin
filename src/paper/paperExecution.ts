@@ -65,6 +65,9 @@ export class PaperTrader {
     const s = this.svc.settings.all();
     if (!s.paperEnabled) return;
     if (decision.verdict !== "BUY_SMALL" && decision.verdict !== "BUY_STRONG") return;
+    // Maturing-survivor scanner ships in SHADOW: its signals are journaled (and
+    // forward-tracked) for A/B vs the newborn feed, but not paper-bought yet.
+    if (s.scanShadowOnly && decision.flags?.includes("src:scan")) return;
 
     this.ensureWallet();
     const balanceSol = this.wallet.balance();

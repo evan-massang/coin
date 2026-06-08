@@ -61,6 +61,17 @@ function gather(svc: Services, limit: number): Gathered {
   for (const s of signals) {
     if (s.verdict === "BUY_SMALL" || s.verdict === "BUY_STRONG") {
       const resolved = s.maxGainPct != null ? ` · peak ${s.maxGainPct >= 0 ? "+" : ""}${Math.round(s.maxGainPct)}%` : "";
+      // Entry-timing context: the run-up the coin had AT entry (DexScreener m5/h1)
+      // + the late-entry risk. Makes "did we chase / buy the top?" visible per trade.
+      const m5 = s.scores.recentM5Pct;
+      const h1 = s.scores.recentH1Pct;
+      const entryCtx =
+        m5 != null || h1 != null
+          ? [
+              `entry run-up: m5 ${fmtPct(m5)} · h1 ${fmtPct(h1)} · late-entry risk ${Math.round(s.scores.lateEntryRisk ?? 0)}` +
+                (s.flags.includes("late-entry-shadow") ? "  ⚠ would block (shadow)" : ""),
+            ]
+          : [];
       buys.push({
         kind: "buy",
         at: s.at,
@@ -68,7 +79,7 @@ function gather(svc: Services, limit: number): Gathered {
         symbol: s.symbol || symOf(s.mint),
         headline: `${s.verdict} · conviction ${s.conviction} · ${s.riskTier ?? "?"}${resolved}`,
         tone: "bull",
-        lines: [...s.reasons, ...(s.caps.length ? [`caps: ${s.caps.join(", ")}`] : []), ...(s.regime ? [`regime ${s.regime} · weather ${s.marketWeather ?? "?"}`] : [])],
+        lines: [...entryCtx, ...s.reasons, ...(s.caps.length ? [`caps: ${s.caps.join(", ")}`] : []), ...(s.regime ? [`regime ${s.regime} · weather ${s.marketWeather ?? "?"}`] : [])],
       });
     } else if (s.verdict === "AVOID" && avoids.length < limit) {
       avoids.push({
@@ -151,4 +162,9 @@ export function buildReasoningReport(svc: Services, limit = 60): string {
 
 function oneLine(s: string): string {
   return String(s ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** Format a signed percentage for the reasoning feed; "n/a" when absent. */
+function fmtPct(x: number | undefined): string {
+  return x == null ? "n/a" : `${x >= 0 ? "+" : ""}${Math.round(x)}%`;
 }

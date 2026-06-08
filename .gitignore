@@ -39,3 +39,11 @@ data/evidence/
 
 # Generated reasoning transcript (runtime data)
 transcript*.txt
+
+# Cloned external tool (not part of this repo)
+RivalSearchMCP/
+
+# Loose QA / debug artifacts at repo root (screenshots, scratch JSON) — regenerable
+/_*.png
+/_*.json
+engine*.log
