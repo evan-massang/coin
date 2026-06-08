@@ -67,6 +67,42 @@ export function coreRoutes(svc: Services): Router {
     res.send(buildReasoningReport(svc, limit));
   });
 
+  // Attention Intelligence (Project Athena): the researched "graveyard" + per-coin
+  // evidence drill-down — so every attention score is inspectable (Phase 15).
+  r.get("/attention", (req, res) => {
+    const limit = clampInt(req.query.limit, 60, 1, 500);
+    res.json(
+      svc.attentionRepo.recent(limit).map((rec) => ({
+        mint: rec.mint,
+        symbol: rec.evidence.symbol,
+        name: rec.evidence.name,
+        at: rec.at,
+        source: rec.source,
+        scores: {
+          attention: rec.scores.attention,
+          humanity: rec.scores.humanity,
+          virality: rec.scores.virality,
+          outsideCrypto: rec.scores.outsideCrypto,
+          culturalStrength: rec.scores.culturalStrength,
+          confidence: rec.scores.confidence,
+        },
+        narrative: rec.scores.narrative,
+        platforms: rec.evidence.platforms,
+        postsCount: rec.evidence.posts.length,
+      })),
+    );
+  });
+
+  // Full evidence for one coin — inspect WHY its attention score is what it is.
+  r.get("/attention/:mint", (req, res) => {
+    const rec = svc.attention?.record(req.params.mint) ?? svc.attentionRepo.get(req.params.mint);
+    if (!rec) {
+      res.status(404).json({ error: "not researched yet" });
+      return;
+    }
+    res.json({ mint: rec.mint, at: rec.at, source: rec.source, scores: rec.scores, evidence: rec.evidence });
+  });
+
   // Market weather + macro (SOL/BTC 24h) + classified regime for the regime panel.
   r.get("/market", async (_req, res) => {
     const s = svc.settings.all();
