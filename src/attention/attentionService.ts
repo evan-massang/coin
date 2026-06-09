@@ -1,4 +1,5 @@
 import type { AttentionEvidence, AttentionScores } from "./types.js";
+import type { ResearchProvider } from "../research/researchProvider.js";
 import { collectEvidence } from "./researchAgent.js";
 import { computeAttention } from "./attentionAgent.js";
 import { judgeAttention } from "./llmJudge.js";
@@ -23,7 +24,8 @@ export interface AttentionRecord {
   scores: AttentionScores;
   evidence: AttentionEvidence;
   at: number;
-  source: "heuristic" | "llm";
+  /** How the read was produced: "heuristic" | "llm" | a provider tag ("manus", …). */
+  source: string;
 }
 
 export interface AttentionServiceOpts {
@@ -31,6 +33,11 @@ export interface AttentionServiceOpts {
   collect?: (coin: CoinRef) => Promise<AttentionEvidence>;
   /** Score the evidence (default: LLM judge if configured, else heuristic). */
   score?: (ev: AttentionEvidence) => Promise<{ scores: AttentionScores; source: "heuristic" | "llm" }>;
+  /** Project Hermes: delegate research to a provider (registry). When set, this is
+   *  used INSTEAD of collect+score — every provider's result still flows through
+   *  decide() via onComplete, so it can never override safety or the gate. The
+   *  collect/score opts remain for the legacy path + tests. */
+  provider?: ResearchProvider;
   /** Re-research a coin only if its cached record is older than this. */
   ttlMs?: number;
   /** Master enable (default true). */
@@ -52,6 +59,7 @@ export class AttentionService {
 
   private readonly collect: (c: CoinRef) => Promise<AttentionEvidence>;
   private readonly score: (ev: AttentionEvidence) => Promise<{ scores: AttentionScores; source: "heuristic" | "llm" }>;
+  private readonly provider?: ResearchProvider;
   private readonly ttlMs: number;
   private readonly enabled: () => boolean;
   private readonly onComplete?: (rec: AttentionRecord) => void;
@@ -60,6 +68,7 @@ export class AttentionService {
   constructor(opts: AttentionServiceOpts = {}) {
     this.collect = opts.collect ?? ((c) => collectEvidence(c, {}));
     this.score = opts.score ?? (async (ev) => ({ scores: computeAttention(ev), source: "heuristic" as const }));
+    this.provider = opts.provider;
     this.ttlMs = opts.ttlMs ?? 30 * 60_000;
     this.enabled = opts.enabled ?? (() => true);
     this.onComplete = opts.onComplete;
@@ -117,8 +126,23 @@ export class AttentionService {
       while (this.queue.length > 0) {
         const coin = this.queue.shift()!;
         try {
-          const evidence = await this.collect(coin);
-          const { scores, source } = await this.score(evidence);
+          // Project Hermes: prefer the provider (registry) when configured; the
+          // registry always falls back to local Athena, so behaviour is identical
+          // to the legacy collect+score path when no remote provider is available.
+          let evidence: AttentionEvidence;
+          let scores: AttentionScores;
+          let source: string;
+          if (this.provider) {
+            const r = await this.provider.research(coin);
+            evidence = r.evidence;
+            scores = r.scores;
+            source = r.source;
+          } else {
+            evidence = await this.collect(coin);
+            const scored = await this.score(evidence);
+            scores = scored.scores;
+            source = scored.source;
+          }
           const rec: AttentionRecord = { mint: coin.mint, scores, evidence, at: this.now(), source };
           this.cache.set(coin.mint, rec);
           const oi = this.order.indexOf(coin.mint);

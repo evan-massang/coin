@@ -5,6 +5,8 @@ import { PumpPortalClient } from "./sources/pumpPortal.js";
 import { DexScanner } from "./sources/dexScanner.js";
 import { AttentionService, makeScorer } from "./attention/attentionService.js";
 import { collectEvidence } from "./attention/researchAgent.js";
+import { ProviderRegistry } from "./research/providerRegistry.js";
+import { AthenaProvider } from "./research/athenaProvider.js";
 import { EntryPipeline } from "./engine/entry.js";
 import { WalletObserver } from "./wallet/walletObserver.js";
 import { ExitEngine } from "./engine/exitEngine.js";
@@ -45,14 +47,26 @@ async function main(): Promise<void> {
     const paper = new PaperTrader(svc);
     if (svc.settings.get("paperEnabled")) paper.ensureWallet();
 
-    // Project Athena: autonomous attention research. Free (News+Wikipedia, opt-in
-    // browser); local-LLM judge if configured, else heuristic. When a shortlisted
-    // coin's research completes, re-score it with the attention facet.
+    // Project Athena / Hermes: autonomous attention research behind a provider
+    // registry. The registry picks the first AVAILABLE provider, MOST-PREFERRED
+    // FIRST, and always falls back to local Athena (free News+Wikipedia + 4 pure
+    // agents, optional local-LLM judge) — so a misconfigured remote provider
+    // silently degrades instead of stalling the engine. A remote Manus provider
+    // (HTTP, settings-keyed) registers AHEAD of Athena once configured; until then
+    // this behaves exactly like the legacy Athena-only path. Every provider's
+    // result re-scores the coin through decide(), so none can bypass the gate.
+    const research = new ProviderRegistry();
+    // research.register(new ManusProvider(...));  // Hermes step 9 — preferred when keyed
+    research.register(
+      new AthenaProvider({
+        collect: (c) => collectEvidence(c, { useBrowser: svc.settings.get("attentionUseBrowser") }),
+        score: makeScorer(() => ({ baseUrl: svc.settings.get("ollamaBaseUrl"), model: svc.settings.get("attentionLlmModel") })),
+      }),
+    );
     const attention = new AttentionService({
       enabled: () => svc.settings.get("attentionEnabled"),
       ttlMs: svc.settings.get("attentionTtlMin") * 60_000,
-      collect: (c) => collectEvidence(c, { useBrowser: svc.settings.get("attentionUseBrowser") }),
-      score: makeScorer(() => ({ baseUrl: svc.settings.get("ollamaBaseUrl"), model: svc.settings.get("attentionLlmModel") })),
+      provider: research,
       warm: svc.attentionRepo.recent(200), // survive restarts via the durable store
       onComplete: (rec) => {
         svc.attentionRepo.upsert(rec); // persist (meme graveyard + durable cache)
