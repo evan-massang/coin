@@ -665,6 +665,74 @@ $("#ch-out").onclick = () => zoom(1.6);
 $("#ch-in").onclick = () => zoom(1 / 1.6);
 $("#ch-live").onclick = () => { CHART.live = true; CHART.endAt = Date.now(); setLiveBtn(); };
 
+// ── Project Hermes: Manus mission board + case file (operator-in-the-loop) ──
+let HM_MISSION = null;
+async function openHermes(prefillMint) {
+  if (prefillMint) $("#hm-mint").value = prefillMint;
+  $("#hermes").classList.add("open");
+  renderMissions();
+}
+async function composeMission() {
+  const mint = $("#hm-mint").value.trim();
+  if (!mint) { $("#hm-out").textContent = "paste a mint first"; return; }
+  $("#hm-out").textContent = "composing…";
+  const r = await api("/manus/mission", { method: "POST", body: { mint } });
+  if (!r.ok) { $("#hm-out").textContent = `error: ${r.error}`; $("#hm-mission").innerHTML = ""; $("#hm-result-wrap").style.display = "none"; HM_MISSION = null; return; }
+  HM_MISSION = r;
+  $("#hm-out").innerHTML = `<span class="green">mission #${r.id} composed</span>`;
+  const m = r.mission;
+  const card = (b) => `<div style="border:1px solid ${b.thin ? COL.red : COL.line};border-radius:4px;padding:6px 8px;min-width:150px;flex:1 1 180px">
+      <div class="small" style="color:${b.thin ? COL.red : COL.green}"><b>${esc(b.key)}</b> · ${Math.round(b.coverage * 100)}%${b.thin ? " ⚠ thin" : ""}</div>
+      <div class="muted small">${b.known.map(esc).join("<br>")}</div></div>`;
+  $("#hm-mission").innerHTML = `
+    <div style="margin-bottom:8px">${esc(m.objective)}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">${m.buckets.map(card).join("")}</div>
+    <div class="muted small" style="margin-top:8px">gaps to verify: <b>${m.gaps.length ? esc(m.gaps.join(", ")) : "none"}</b></div>
+    <div class="muted small" style="margin-top:4px">output contract: <code>${esc(m.outputContract)}</code></div>`;
+  $("#hm-result-wrap").style.display = "";
+}
+async function submitResult() {
+  if (!HM_MISSION) { $("#hm-out").textContent = "compose a mission first"; return; }
+  const body = { recommendation: $("#hm-rec").value, confidence: Number($("#hm-conf").value), narrative: $("#hm-narr").value.trim() || undefined };
+  $("#hm-out").textContent = "submitting…";
+  const r = await api(`/manus/mission/${HM_MISSION.id}/result`, { method: "POST", body });
+  $("#hm-out").innerHTML = r.ok ? `<span class="green">submitted → re-scored (attention ${Math.round(r.attention)})</span>` : `<span class="red">error: ${esc(r.error)}</span>`;
+  $("#hm-result-wrap").style.display = "none"; $("#hm-mission").innerHTML = ""; HM_MISSION = null;
+  renderMissions(); loadAll();
+}
+async function renderMissions() {
+  const rows = await api("/manus/missions?limit=30");
+  $("#hm-list").innerHTML = Array.isArray(rows) && rows.length
+    ? rows.map((m) => {
+        const v = (m.mission && m.mission.verdict) || m.verdict || "?";
+        const res = m.result ? ` · <b style="color:${m.result.recommendation === "confirm" ? COL.green : m.result.recommendation === "avoid" ? COL.red : COL.gold}">${esc(m.result.recommendation)}</b> (${esc(m.provider || "manus")})` : "";
+        return `<div class="rz-item" data-mint="${esc(m.mint)}" style="cursor:pointer"><b>$${esc(m.symbol || m.mint.slice(0, 6))}</b> <span class="muted">#${m.id}</span> · ${esc(v)} · <span class="${m.status === "resolved" ? "green" : "gold"}">${esc(m.status)}</span>${res}</div>`;
+      }).join("")
+    : `<div class="muted small">no missions yet — compose one above</div>`;
+  $("#hm-list").querySelectorAll(".rz-item[data-mint]").forEach((el) => (el.onclick = () => { $("#hm-mint").value = el.getAttribute("data-mint"); loadCase(); }));
+}
+async function loadCase(mint) {
+  mint = (mint || $("#hm-mint").value).trim();
+  if (!mint) { $("#hm-out").textContent = "paste a mint first"; return; }
+  const c = await api(`/hermes/case/${mint}`);
+  if (c && c.ok === false) { $("#hm-casefile").innerHTML = `<div class="muted small">${esc(c.error)}</div>`; return; }
+  const o = c.outcome || {};
+  $("#hm-casefile").innerHTML = `
+    <div><b>$${esc(c.symbol || mint.slice(0, 6))}</b> · current ${c.current ? `<b style="color:${vcol(c.current.verdict)}">${esc(c.current.verdict)}</b> @ ${c.current.conviction}` : "—"}</div>
+    <div class="muted small">timeline: ${c.timeline && c.timeline.length ? c.timeline.map((t) => esc(t.verdict)).join(" → ") : "—"}</div>
+    <div class="muted small">research: ${c.research ? `attention ${c.research.attention} · ${Math.round(c.research.confidence * 100)}% · ${esc(c.research.source)}` : "none"}</div>
+    <div class="muted small">council: ${c.council.opinions} opinions · ${c.council.confirms}▲/${c.council.cautions}△ · resolved ${c.council.resolved} (${c.council.wins} win)</div>
+    <div class="muted small">trades: ${c.trades.buys} buy / ${c.trades.sells} sell · realized <span class="${c.trades.realizedPnlSol >= 0 ? "green" : "red"}">${c.trades.realizedPnlSol} SOL</span></div>
+    <div class="muted small">missions: ${c.missions && c.missions.length ? c.missions.map((m) => `#${m.id}:${esc(m.status)}${m.recommendation ? "/" + esc(m.recommendation) : ""}`).join(", ") : "none"}</div>
+    <div class="muted small">outcome: ${o.resolved ? `peak ${Math.round(o.maxGainPct)}% · worst ${Math.round(o.maxDrawdownPct || 0)}%` : "unresolved"}</div>`;
+}
+$("#open-hermes").onclick = () => openHermes();
+$("#close-hermes").onclick = () => $("#hermes").classList.remove("open");
+$("#hm-compose").onclick = composeMission;
+$("#hm-submit").onclick = submitResult;
+$("#hm-case").onclick = () => loadCase();
+$("#send-manus").onclick = () => openHermes(STATE.selectedMint || "");
+
 (async function boot() {
   await loadAll(); drawProfitChart(); setLiveBtn(); connectWs();
   setInterval(loadAll, 10000);

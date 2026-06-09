@@ -20,7 +20,7 @@
         <div class="tb-scan"><span class="dot-live"></span> OBSERVING <b id="ls-timer">00:00:00</b></div>
         <div class="tb-right">
           <div class="tb-clock"><span id="t-clock">--:--:--</span> · <span class="muted">UTC</span></div>
-          <div class="tb-sys">SYSTEM <span id="sys" class="green">● ONLINE</span> · <a class="cfg" id="open-config">⚙ CONFIG</a></div>
+          <div class="tb-sys">SYSTEM <span id="sys" class="green">● ONLINE</span> · <a class="cfg" id="open-hermes">▣ MANUS</a> · <a class="cfg" id="open-config">⚙ CONFIG</a></div>
         </div>
       </header>
 
@@ -77,6 +77,7 @@
             <div class="why-verdict" id="why-verdict">—</div>
             <ul class="why-list" id="why-list"><li class="muted">select a token to see the engine's reasoning</li></ul>
             <div class="why-links" id="why-links"></div>
+            <div class="room-actions"><a class="cfg gold" id="send-manus">▸ SEND TO MANUS — research this coin</a></div>
           </div>
           <!-- market regime -->
           <div class="panel">
@@ -182,6 +183,35 @@
           <label class="full">token mint <input type="text" name="mint" placeholder="paste a mint"/></label>
           <div class="cfgrow"><button class="btn" type="submit">Run research</button><span class="muted" id="ai-out"></span></div>
         </form>
+      </div>
+    </div>
+
+    <!-- ── PROJECT HERMES — Manus mission board (operator-in-the-loop) + case file ── -->
+    <div class="overlay" id="hermes">
+      <div class="overlay-box wide">
+        <div class="panel-head"><span class="tag dark">▣ MANUS MISSIONS</span><h2>attention research · operator-in-the-loop · advisory only</h2><a class="cfg" id="close-hermes">✕ CLOSE</a></div>
+        <div id="hermes-body">
+          <div class="cfgrow">
+            <input type="text" id="hm-mint" placeholder="paste a mint (or select a coin → Send to Manus)" style="flex:1;min-width:260px"/>
+            <button class="btn" type="button" id="hm-compose">Compose mission</button>
+            <button class="btn ghost" type="button" id="hm-case">Case file</button>
+            <span class="muted small" id="hm-out"></span>
+          </div>
+          <div id="hm-mission" style="margin-top:10px"></div>
+          <div id="hm-result-wrap" style="display:none;margin-top:10px">
+            <div class="sec-label">PASTE MANUS RECOMMENDATION → re-scores through the safety gate (advisory)</div>
+            <div class="cfgrow">
+              <select id="hm-rec"><option value="confirm">confirm</option><option value="caution">caution</option><option value="unsure">unsure</option><option value="avoid">avoid</option></select>
+              <input type="number" id="hm-conf" min="0" max="100" value="70" style="width:120px" title="confidence 0-100"/>
+              <input type="text" id="hm-narr" placeholder="one-line narrative (optional)" style="flex:1;min-width:200px"/>
+              <button class="btn" type="button" id="hm-submit">Submit → re-score</button>
+            </div>
+          </div>
+          <div class="sec-label" style="margin-top:16px">RECENT MISSIONS</div>
+          <div id="hm-list" class="rz-feed"><div class="muted small">loading…</div></div>
+          <div class="sec-label" style="margin-top:16px">CASE FILE — decision replay</div>
+          <div id="hm-casefile"><div class="muted small">enter a mint + Case file to replay a coin's full decision history</div></div>
+        </div>
       </div>
     </div>
 
