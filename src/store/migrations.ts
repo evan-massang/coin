@@ -373,6 +373,32 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE signals ADD COLUMN pair_created_at INTEGER;
     `,
   },
+  {
+    version: 12,
+    up: /* sql */ `
+      -- Project Hermes: the Manus mission board. A mission is a structured
+      -- investigation blueprint (MissionGenerator) composed for a shortlisted coin
+      -- from evidence the engine already collected. The operator sends it to Manus
+      -- (or a provider answers), then the recommendation is pasted back and flows
+      -- through the SAME attention re-score path (decide() runs the safety gate
+      -- FIRST). A mission carries NO authority of its own — it is advisory.
+      CREATE TABLE IF NOT EXISTS missions (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        mint         TEXT NOT NULL,
+        symbol       TEXT,
+        verdict      TEXT,
+        conviction   REAL,
+        status       TEXT NOT NULL DEFAULT 'open',
+        mission_json TEXT NOT NULL,
+        result_json  TEXT,
+        provider     TEXT,
+        created_at   INTEGER NOT NULL,
+        resolved_at  INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_missions_mint ON missions(mint, created_at);
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

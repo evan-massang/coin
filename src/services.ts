@@ -11,6 +11,7 @@ import { CreatorHistoryRepo } from "./store/repositories/creatorHistoryRepo.js";
 import { FingerprintRepo } from "./store/repositories/fingerprintRepo.js";
 import { WalletClusterRepo } from "./store/repositories/walletClusterRepo.js";
 import { CouncilRepo } from "./store/repositories/councilRepo.js";
+import { MissionRepo } from "./store/repositories/missionRepo.js";
 import { EventRecorder } from "./replay/eventRecorder.js";
 import { AiComputer } from "./aiComputer/aiComputer.js";
 import type { AttentionService } from "./attention/attentionService.js";
@@ -61,6 +62,8 @@ export interface Services {
   fingerprints: FingerprintRepo;
   walletCluster: WalletClusterRepo;
   council: CouncilRepo;
+  /** Project Hermes mission board store (Manus missions + pasted recommendations). */
+  missions: MissionRepo;
   events: EventRecorder;
   aiComputer: AiComputer;
   hub: WsHub;
@@ -88,6 +91,7 @@ export function createServices(db: DB = getDb()): Services {
   const fingerprints = new FingerprintRepo(db);
   const walletCluster = new WalletClusterRepo(db);
   const council = new CouncilRepo(db);
+  const missions = new MissionRepo(db);
   const events = new EventRecorder(db);
   const attentionRepo = new AttentionRepo(db);
   const hub = new WsHub();
@@ -124,6 +128,7 @@ export function createServices(db: DB = getDb()): Services {
     fingerprints,
     walletCluster,
     council,
+    missions,
     events,
     attentionRepo,
     aiComputer,

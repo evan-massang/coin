@@ -144,16 +144,7 @@ export class AttentionService {
             source = scored.source;
           }
           const rec: AttentionRecord = { mint: coin.mint, scores, evidence, at: this.now(), source };
-          this.cache.set(coin.mint, rec);
-          const oi = this.order.indexOf(coin.mint);
-          if (oi >= 0) this.order.splice(oi, 1);
-          this.order.push(coin.mint);
-          if (this.order.length > 500) this.order.shift();
-          try {
-            this.onComplete?.(rec);
-          } catch (e) {
-            log.warn(`attention onComplete failed: ${(e as Error).message}`);
-          }
+          this.finish(rec);
         } catch (e) {
           log.warn(`attention research failed for ${coin.symbol ?? coin.mint}: ${(e as Error).message}`);
         } finally {
@@ -163,6 +154,30 @@ export class AttentionService {
     } finally {
       this.running = false;
     }
+  }
+
+  /** Cache a completed record, maintain recency order, and fire onComplete
+   *  (persist + re-score). Shared by the normal research path and injectResult. */
+  private finish(rec: AttentionRecord): void {
+    this.cache.set(rec.mint, rec);
+    const oi = this.order.indexOf(rec.mint);
+    if (oi >= 0) this.order.splice(oi, 1);
+    this.order.push(rec.mint);
+    if (this.order.length > 500) this.order.shift();
+    try {
+      this.onComplete?.(rec);
+    } catch (e) {
+      log.warn(`attention onComplete failed: ${(e as Error).message}`);
+    }
+  }
+
+  /** Project Hermes: inject a research result produced OUT OF BAND — e.g. an
+   *  operator pasting a Manus recommendation via the mission board. It is cached
+   *  and fires onComplete exactly like a normal pass, so it flows through
+   *  rescore → decide() (safety gate first): it can never override safety, force a
+   *  buy, or lower the conviction gate. */
+  injectResult(rec: AttentionRecord): void {
+    this.finish(rec);
   }
 }
 
