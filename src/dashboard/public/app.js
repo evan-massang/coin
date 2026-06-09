@@ -724,6 +724,8 @@ async function loadCase(mint) {
     <div class="muted small">council: ${c.council.opinions} opinions · ${c.council.confirms}▲/${c.council.cautions}△ · resolved ${c.council.resolved} (${c.council.wins} win)</div>
     <div class="muted small">trades: ${c.trades.buys} buy / ${c.trades.sells} sell · realized <span class="${c.trades.realizedPnlSol >= 0 ? "green" : "red"}">${c.trades.realizedPnlSol} SOL</span></div>
     <div class="muted small">missions: ${c.missions && c.missions.length ? c.missions.map((m) => `#${m.id}:${esc(m.status)}${m.recommendation ? "/" + esc(m.recommendation) : ""}`).join(", ") : "none"}</div>
+    <div class="muted small">thesis: ${c.thesis ? `entry <b style="color:${vcol(c.thesis.verdict)}">${esc(c.thesis.verdict)}</b>@${c.thesis.conviction} · attention ${c.thesis.attentionAtEntry}` : "no BUY yet"}</div>
+    <div class="muted small">thesis health: ${c.thesisHealth ? `<b style="color:${c.thesisHealth.status === "broken" ? COL.red : c.thesisHealth.status === "weakening" ? COL.gold : COL.green}">${c.thesisHealth.status}</b> · entry ${c.thesisHealth.entry} → now ${c.thesisHealth.current} (Δ${c.thesisHealth.delta >= 0 ? "+" : ""}${c.thesisHealth.delta})` : "—"}</div>
     <div class="muted small">outcome: ${o.resolved ? `peak ${Math.round(o.maxGainPct)}% · worst ${Math.round(o.maxDrawdownPct || 0)}%` : "unresolved"}</div>`;
 }
 $("#open-hermes").onclick = () => openHermes();

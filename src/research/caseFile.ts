@@ -33,6 +33,11 @@ export interface CaseFile {
   council: { sessions: number; opinions: number; confirms: number; cautions: number; avgScore: number; resolved: number; wins: number };
   trades: { buys: number; sells: number; realizedPnlSol: number; lastReason?: string };
   missions: Array<{ id: number; status: string; verdict: string; conviction: number; gaps: string[]; recommendation?: string; provider?: string; createdAt: number }>;
+  /** Entry thesis (Phase 11): the rationale captured at the FIRST BUY — null if never bought. */
+  thesis: { at: number; verdict: string; conviction: number; attentionAtEntry: number; keyReasons: string[] } | null;
+  /** Advisory, READ-ONLY thesis-decay read (Phase 13): entry vs current attention.
+   *  Never triggers a sell — surfaced to the operator only. Null with no thesis/research. */
+  thesisHealth: { entry: number; current: number; delta: number; status: "intact" | "weakening" | "broken" } | null;
   outcome: { maxGainPct?: number; maxDrawdownPct?: number; resolved: boolean };
   generatedAt: number;
 }
@@ -88,6 +93,27 @@ export function buildCaseFile(i: CaseFileInput): CaseFile {
     createdAt: m.createdAt,
   }));
 
+  // Entry thesis (Phase 11): the first BUY is the moment we committed; its score
+  // snapshot + reasons ARE the recorded rationale. Derived from the journal — no
+  // separate store. thesisHealth (Phase 13) compares it to the latest attention
+  // read; it is ADVISORY + READ-ONLY and never acts on the position.
+  const entry = signals.find((s) => s.verdict === "BUY_SMALL" || s.verdict === "BUY_STRONG") ?? null;
+  const thesis = entry
+    ? {
+        at: entry.at,
+        verdict: entry.verdict,
+        conviction: entry.conviction,
+        attentionAtEntry: Math.round(entry.scores.attention ?? 0),
+        keyReasons: entry.reasons.slice(0, 3),
+      }
+    : null;
+  const curAtt = i.attention ? Math.round(i.attention.scores.attention) : null;
+  let thesisHealth: CaseFile["thesisHealth"] = null;
+  if (thesis && curAtt != null) {
+    const delta = curAtt - thesis.attentionAtEntry;
+    thesisHealth = { entry: thesis.attentionAtEntry, current: curAtt, delta, status: delta <= -20 ? "broken" : delta < -8 ? "weakening" : "intact" };
+  }
+
   const gains = signals.map((s) => s.maxGainPct).filter((x): x is number => x != null);
   const draws = signals.map((s) => s.maxDrawdownPct).filter((x): x is number => x != null);
   const outcome = {
@@ -105,6 +131,8 @@ export function buildCaseFile(i: CaseFileInput): CaseFile {
     council,
     trades,
     missions,
+    thesis,
+    thesisHealth,
     outcome,
     generatedAt: i.now,
   };

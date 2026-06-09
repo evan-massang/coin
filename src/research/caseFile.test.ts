@@ -37,6 +37,14 @@ const base: CaseFileInput = {
   now: 9_999,
 };
 
+function attRec(attention: number) {
+  return {
+    mint: "M", at: 180, source: "manus",
+    scores: { humanity: 50, virality: 50, outsideCrypto: 50, culturalStrength: 50, attention, confidence: 0.7, tags: [] as string[], narrative: "n" },
+    evidence: { mint: "M", query: "M", posts: [], platforms: [], links: [], fetchedAt: 180 },
+  };
+}
+
 describe("buildCaseFile", () => {
   it("assembles current + a verdict-evolution timeline oldest→newest", () => {
     const cf = buildCaseFile(base);
@@ -94,5 +102,31 @@ describe("buildCaseFile", () => {
       },
     });
     expect(cf.research).toEqual({ attention: 64, confidence: 0.7, source: "manus", narrative: "spreading" });
+  });
+
+  it("derives the entry thesis from the first BUY signal (Phase 11)", () => {
+    const cf = buildCaseFile({
+      ...base,
+      signals: [
+        sig({ at: 100, verdict: "WATCH_ONLY", conviction: 49 }),
+        sig({ at: 200, verdict: "BUY_SMALL", conviction: 58, scores: { ...emptyScores(), attention: 70 }, reasons: ["attention re-score (WATCH_ONLY→BUY_SMALL): dog meme spreading"] }),
+        sig({ at: 300, verdict: "SELL_TRIM", conviction: 58 }),
+      ],
+    });
+    expect(cf.thesis).toMatchObject({ verdict: "BUY_SMALL", conviction: 58, attentionAtEntry: 70 });
+    expect(cf.thesis?.keyReasons[0]).toMatch(/dog meme/);
+  });
+
+  it("thesisHealth compares entry vs current attention — advisory, read-only (Phase 13)", () => {
+    const signals = [sig({ at: 200, verdict: "BUY_SMALL", conviction: 58, scores: { ...emptyScores(), attention: 70 } })];
+    expect(buildCaseFile({ ...base, signals, attention: attRec(66) }).thesisHealth?.status).toBe("intact"); // -4
+    expect(buildCaseFile({ ...base, signals, attention: attRec(58) }).thesisHealth?.status).toBe("weakening"); // -12
+    expect(buildCaseFile({ ...base, signals, attention: attRec(40) }).thesisHealth?.status).toBe("broken"); // -30
+  });
+
+  it("no thesis / health when the coin was never a BUY", () => {
+    const cf = buildCaseFile({ ...base, signals: [sig({ verdict: "WATCH_ONLY" })], attention: attRec(50) });
+    expect(cf.thesis).toBeNull();
+    expect(cf.thesisHealth).toBeNull();
   });
 });
