@@ -65,6 +65,14 @@ export class MissionRepo {
     return rows.map(rowToMission);
   }
 
+  /** Every mission for one mint, newest first (Hermes case file). */
+  forMint(mint: string, limit = 50): MissionRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM missions WHERE mint=? ORDER BY created_at DESC LIMIT ?")
+      .all(mint, limit) as Record<string, unknown>[];
+    return rows.map(rowToMission);
+  }
+
   /** Open missions, newest first (the operator's to-do queue). */
   open(limit = 50): MissionRow[] {
     const rows = this.db

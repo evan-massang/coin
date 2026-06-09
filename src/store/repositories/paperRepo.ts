@@ -123,18 +123,15 @@ export class PaperRepo {
       string,
       unknown
     >[];
-    return rows.map((r) => ({
-      id: r.id as number,
-      mint: r.mint as string,
-      side: r.side as "buy" | "sell",
-      priceUsd: r.price_usd as number,
-      solAmount: r.sol_amount as number,
-      tokenAmount: r.token_amount as number,
-      realizedPnlSol: r.realized_pnl_sol as number,
-      remainingTokenAmount: r.remaining_token_amount as number,
-      reason: (r.reason as string) ?? undefined,
-      at: r.at as number,
-    }));
+    return rows.map(rowToFill);
+  }
+
+  /** Simulated fills for one mint, newest first (Hermes case file). */
+  fillsForMint(mint: string, limit = 100): PaperFill[] {
+    const rows = this.db
+      .prepare("SELECT * FROM paper_trades WHERE mint=? ORDER BY at DESC LIMIT ?")
+      .all(mint, limit) as Record<string, unknown>[];
+    return rows.map(rowToFill);
   }
 
   realizedPnlSol(): number {
@@ -143,4 +140,19 @@ export class PaperRepo {
     };
     return r.s;
   }
+}
+
+function rowToFill(r: Record<string, unknown>): PaperFill {
+  return {
+    id: r.id as number,
+    mint: r.mint as string,
+    side: r.side as "buy" | "sell",
+    priceUsd: r.price_usd as number,
+    solAmount: r.sol_amount as number,
+    tokenAmount: r.token_amount as number,
+    realizedPnlSol: r.realized_pnl_sol as number,
+    remainingTokenAmount: r.remaining_token_amount as number,
+    reason: (r.reason as string) ?? undefined,
+    at: r.at as number,
+  };
 }

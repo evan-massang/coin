@@ -67,6 +67,14 @@ export class CouncilRepo {
     return rows.map(rowToOpinion);
   }
 
+  /** Every opinion for one mint, newest first (Hermes case file / decision replay). */
+  forMint(mint: string, limit = 60): CouncilOpinionRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM council_opinions WHERE mint=? ORDER BY at DESC LIMIT ?")
+      .all(mint, limit) as Record<string, unknown>[];
+    return rows.map(rowToOpinion);
+  }
+
   /** Per-seat accuracy + a bounded dynamic weight (equal until enough samples). */
   memberStats(): MemberStat[] {
     const rows = this.db
