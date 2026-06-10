@@ -93,6 +93,30 @@ export function manusRoutes(svc: Services): Router {
     res.status(out.ok ? 200 : 409).json({ ...out, coins: coins.length });
   });
 
+  // ATTACH a task the operator created directly in the Manus app (paste the task
+  // URL or id). A mission row is created in 'sent' state pointing at it; the
+  // background poller then ingests its answer exactly like an engine-dispatched
+  // mission (discovery answers inject candidates; research/deepdive re-score).
+  r.post("/manus/attach", (req, res) => {
+    if (!svc.manus?.available()) {
+      res.status(409).json({ ok: false, error: "no Manus API key configured" });
+      return;
+    }
+    const rawTask = String(req.body?.task ?? "").trim();
+    // Accept a bare task id or any manus.im URL containing it (.../app/<id>).
+    const m = rawTask.match(/(?:manus\.im\/app\/)?([A-Za-z0-9_-]{10,})\/?$/);
+    const taskId = m?.[1];
+    if (!taskId) {
+      res.status(400).json({ ok: false, error: "pass body.task = Manus task id or manus.im/app/<id> URL" });
+      return;
+    }
+    // discovery/deepdive only — their answers carry contract addresses; a per-coin
+    // research answer has no address so an attached one couldn't be applied.
+    const kind = req.body?.kind === "deepdive" ? "deepdive" : "discovery";
+    const out = svc.manus.attachExternalTask(taskId, kind);
+    res.status(out.ok ? 200 : 409).json(out);
+  });
+
   // Manually dispatch an existing OPEN mission to the Manus API.
   r.post("/manus/mission/:id/send", async (req, res) => {
     if (!svc.manus?.available()) {

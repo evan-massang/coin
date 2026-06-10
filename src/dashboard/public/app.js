@@ -710,8 +710,33 @@ async function submitResult() {
   $("#hm-result-wrap").style.display = "none"; $("#hm-mission").innerHTML = ""; HM_MISSION = null;
   renderMissions(); loadAll();
 }
+function renderHunt(m) {
+  // Display a resolved discovery/deepdive answer (the picks) in the overlay —
+  // the answer used to live only in the DB and the Manus app.
+  const el = $("#hm-hunt");
+  if (!m || !m.resultRaw) { el.innerHTML = `<div class="muted small">no resolved hunts yet — click 🔭 DISCOVER or wait for the hourly hunt</div>`; return; }
+  const raw = m.resultRaw;
+  const items = raw.candidates || raw.results || [];
+  const head = `<div class="muted small">#${m.id} [${esc(m.kind)}] · ${items.length} pick(s)${raw.rejectedCount != null ? ` · reviewed/rejected ${raw.rejectedCount}` : ""}${raw.marketNote ? ` · ${esc(String(raw.marketNote).slice(0, 140))}` : ""}</div>`;
+  el.innerHTML = head + (items.length
+    ? items.map((c) => {
+        const rec = c.recommendation ? ` · <b style="color:${c.recommendation === "confirm" ? COL.green : c.recommendation === "avoid" ? COL.red : COL.gold}">${esc(c.recommendation)}</b>` : "";
+        return `<div style="border:1px solid ${COL.line};border-radius:4px;padding:6px 8px;margin-top:6px">
+          <div><b>$${esc(c.ticker || (c.contractAddress || "").slice(0, 6))}</b> · conf ${Math.round(c.confidence ?? 0)} · attn ${Math.round(c.attentionScore ?? 0)}${rec}
+            ${c.marketCapUsd ? ` · mcap $${commas(Math.round(c.marketCapUsd))}` : ""}${c.liquidityUsd ? ` · liq $${commas(Math.round(c.liquidityUsd))}` : ""}</div>
+          <div class="muted small" style="word-break:break-all">mint: ${esc(c.contractAddress || "?")}</div>
+          ${c.narrative ? `<div class="muted small">${esc(c.narrative)}</div>` : ""}
+          ${c.whyItMoons || c.keyFinding ? `<div class="muted small">why: ${esc(c.whyItMoons || c.keyFinding)}</div>` : ""}
+          ${c.bearCase ? `<div class="small" style="color:${COL.red}">bear: ${esc(c.bearCase)}</div>` : ""}
+        </div>`;
+      }).join("")
+    : `<div class="muted small" style="margin-top:6px">zero picks this pass — the hard filters rejected everything reviewed (that's them working; the next hunt retries with fresh seeds)</div>`);
+}
 async function renderMissions() {
   const rows = await api("/manus/missions?limit=30");
+  // Auto-show the newest resolved hunt's picks.
+  const hunt = Array.isArray(rows) ? rows.find((m) => (m.kind === "discovery" || m.kind === "deepdive") && m.status === "resolved") : null;
+  renderHunt(hunt);
   $("#hm-list").innerHTML = Array.isArray(rows) && rows.length
     ? rows.map((m) => {
         const v = (m.mission && m.mission.verdict) || m.verdict || "?";
@@ -723,7 +748,22 @@ async function renderMissions() {
         return `<div class="rz-item" data-mint="${esc(m.mint)}" style="cursor:pointer">${kind}<b>$${esc(m.symbol || m.mint.slice(0, 6))}</b> <span class="muted">#${m.id}</span> · ${esc(v)} · <span class="${stCol}">${esc(m.status)}</span>${res}${live}${err}</div>`;
       }).join("")
     : `<div class="muted small">no missions yet — compose one above</div>`;
-  $("#hm-list").querySelectorAll(".rz-item[data-mint]").forEach((el) => (el.onclick = () => { $("#hm-mint").value = el.getAttribute("data-mint"); loadCase(); }));
+  $("#hm-list").querySelectorAll(".rz-item[data-mint]").forEach((el, i) => (el.onclick = () => {
+    const m = rows[i];
+    if (m && (m.kind === "discovery" || m.kind === "deepdive")) { renderHunt(m); return; } // show the picks
+    $("#hm-mint").value = el.getAttribute("data-mint");
+    loadCase();
+  }));
+}
+async function attachTask() {
+  const task = $("#hm-attach").value.trim();
+  if (!task) { $("#hm-out3").textContent = "paste a manus.im task URL or id"; return; }
+  $("#hm-out3").textContent = "attaching…";
+  const r = await api("/manus/attach", { method: "POST", body: { task } });
+  $("#hm-out3").innerHTML = r.ok
+    ? `<span class="green">attached as mission #${r.id} — the engine ingests its answer within ~20s</span>`
+    : `<span class="red">${esc(r.error || "failed")}</span>`;
+  if (r.ok) { $("#hm-attach").value = ""; setTimeout(renderMissions, 1500); }
 }
 async function loadCase(mint) {
   mint = (mint || $("#hm-mint").value).trim();
@@ -765,6 +805,7 @@ $("#hm-submit").onclick = submitResult;
 $("#hm-case").onclick = () => loadCase();
 $("#hm-discover").onclick = fireDiscover;
 $("#hm-deepdive").onclick = fireDeepdive;
+$("#hm-attach-btn").onclick = attachTask;
 $("#send-manus").onclick = () => openHermes(STATE.selectedMint || "");
 
 (async function boot() {

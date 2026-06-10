@@ -36,6 +36,18 @@ export function defaultExitPlan(maxHoldMs: number, trailingStopPct = 0.3): ExitP
   return { ladder: buildDefaultLadder(), trailingStopPct, maxHoldMs };
 }
 
+/** Hermes Phase 13/14 — ADVISORY thesis-decay annotation for exit alerts. Pure:
+ *  compares the coin's CURRENT attention read vs its attention at the first BUY.
+ *  Never changes exit behavior — it only annotates the operator's alert flags
+ *  ("the attention thesis you bought is weakening/broken"). */
+export function thesisDecayFlags(currentAttention: number | undefined, entryAttention: number | undefined): string[] {
+  if (currentAttention == null || entryAttention == null || entryAttention <= 0) return [];
+  const delta = Math.round(currentAttention) - Math.round(entryAttention);
+  if (delta <= -20) return ["thesis-broken"];
+  if (delta < -8) return ["thesis-weakening"];
+  return [];
+}
+
 export interface HardSignals {
   devWalletSold?: boolean;
   topHolderDumping?: boolean;
@@ -249,6 +261,18 @@ export class ExitEngine {
 
   private sellDecision(pos: Position, sig: ExitSignal): Decision {
     const multiple = pos.entryPriceUsd > 0 && pos.lastPriceUsd ? pos.lastPriceUsd / pos.entryPriceUsd : 1;
+    // ADVISORY thesis-decay flag (Hermes Phase 13/14): current attention vs the
+    // attention at the first BUY. Annotates the alert only — never drives the exit.
+    let thesis: string[] = [];
+    try {
+      const cur = this.svc.attention?.get(pos.mint)?.attention;
+      const entry = this.svc.signals
+        .forMint(pos.mint, 50)
+        .find((s) => s.verdict === "BUY_SMALL" || s.verdict === "BUY_STRONG")?.scores.attention;
+      thesis = thesisDecayFlags(cur, entry);
+    } catch {
+      /* advisory only — never let annotation break an exit */
+    }
     return {
       mint: pos.mint,
       symbol: pos.symbol,
@@ -256,7 +280,7 @@ export class ExitEngine {
       conviction: sig.kind === "SELL_EXIT_NOW" ? 100 : 70,
       scores: { ...emptyScores(), momentum: Math.round(Math.min(100, multiple * 20)) },
       reasons: [sig.reason, `${multiple.toFixed(1)}x from entry`],
-      flags: sig.hard ? ["hard-exit"] : [],
+      flags: [...(sig.hard ? ["hard-exit"] : []), ...thesis],
       caps: [],
       at: sig.at,
     };

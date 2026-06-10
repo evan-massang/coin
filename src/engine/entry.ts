@@ -411,7 +411,8 @@ export class EntryPipeline {
     // Attention Intelligence (Project Athena): cached research result, if the coin
     // was already shortlisted + researched. Confidence is 0 when unresearched ⇒ the
     // facet is dropped from the conviction blend (blind newborns are unaffected).
-    const att = this.svc.attention?.get(token.mint);
+    const attRec = this.svc.attention?.record(token.mint);
+    const att = attRec?.scores;
     const scores: ScoreBreakdown = {
       safety: stage1.score,
       organic: dex.confident ? dex.organic : scoreOf(results, "organic"),
@@ -441,6 +442,11 @@ export class EntryPipeline {
     if (hypeData?.isRevival) flags.push("revival");
     if (tracked.token.discoverySource === "scan") flags.push("src:scan"); // maturing-survivor scanner (A/B + shadow)
     if (tracked.token.discoverySource === "manus") flags.push("src:manus"); // Manus discovery candidate (Hermes Phase 3)
+    // Research provenance on DIRECT scores too (V5.1 fix): previously only the
+    // rescore path flagged research:<source>, so a decision built on CACHED Manus
+    // research carried no provenance — and the Manus-validated shadow unlock
+    // missed it. Every decision that consumed a research read now says whose.
+    if (attRec) flags.push(`research:${attRec.source}`);
 
     // Per-facet confidence: unknown agents (couldn't compute) are dropped from the
     // conviction blend rather than anchoring it at a frozen default (Cycle 1 fix).

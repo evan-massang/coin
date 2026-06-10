@@ -119,6 +119,23 @@ export class ManusMissionRunner {
     }
   }
 
+  /** Attach a task the operator created directly in the Manus app: a mission row
+   *  in 'sent' state pointing at the external task id — the poller ingests its
+   *  answer on the next tick exactly like an engine-dispatched mission. The
+   *  result must still match the kind's structured-output shape; a free-text
+   *  answer fails honestly ("stopped without structured output"). */
+  attachExternalTask(taskId: string, kind: "discovery" | "deepdive"): { ok: boolean; id?: number; error?: string } {
+    const now = this.now();
+    const mission = pseudoMission(kind, "ATTACHED", `Operator-attached Manus task ${taskId} (${kind}) — answer ingested by the poller.`, now);
+    const id = this.svc.missions.insert(mission, kind);
+    if (!this.svc.missions.setSent(id, taskId, `https://manus.im/app/${taskId}`, now)) {
+      return { ok: false, id, error: "could not mark attached mission as sent" };
+    }
+    log.ok(`manus: attached external task ${taskId} as mission #${id} (${kind})`);
+    metrics.inc("manus_task_attached");
+    return { ok: true, id };
+  }
+
   /** Seed the hunt with the engine's OWN live shortlist — the data edge cloud
    *  agents lack (discovery #8 proved public APIs can't see hours-old micro-caps).
    *  GRADUATED COINS ONLY (Golden-Filter scanner hits or coins with a real DEX
