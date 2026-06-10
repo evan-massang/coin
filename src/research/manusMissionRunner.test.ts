@@ -196,7 +196,7 @@ describe("ManusMissionRunner", () => {
     expect(missions.recent(10).filter((m) => m.kind === "deepdive")).toHaveLength(1);
   });
 
-  it("DISCOVERY scheduling: auto-dispatches on interval, never doubles up while one is in flight", async () => {
+  it("DISCOVERY scheduling: never doubles up while one is in flight", async () => {
     (svc.settings as SettingsStore).update({ manusDiscoveryEnabled: true, manusDiscoveryIntervalMin: 60 });
     const f = fetchScript([
       { status: 200, body: { ok: true, task_id: "TD1" } }, // dispatch
@@ -208,6 +208,24 @@ describe("ManusMissionRunner", () => {
     expect(missions.recent(10).filter((m) => m.kind === "discovery")).toHaveLength(1);
     await r.pollOnce(); // one in flight → no new dispatch
     expect(missions.recent(10).filter((m) => m.kind === "discovery")).toHaveLength(1);
+  });
+
+  it("CONTINUOUS chaining: the next hunt dispatches IMMEDIATELY after a result lands (no timer)", async () => {
+    (svc.settings as SettingsStore).update({ manusDiscoveryEnabled: true, manusDiscoveryIntervalMin: 60 });
+    const f = fetchScript([
+      { status: 200, body: { ok: true, task_id: "TD1" } }, // dispatch hunt 1
+      { status: 200, body: { events: [
+        { type: "structured_output_result", success: true, value: { candidates: [], rejectedCount: 3, marketNote: "dry" } },
+        { type: "status_update", agent_status: "stopped" },
+      ] } }, // hunt 1 resolves
+      { status: 200, body: { ok: true, task_id: "TD2" } }, // hunt 2 chains immediately
+      { status: 200, body: { events: [{ type: "status_update", agent_status: "running" }] } },
+    ]);
+    const r = runner(f);
+    await r.pollOnce(); // dispatch #1 + resolve it in the same tick
+    expect(missions.recent(10).filter((m) => m.kind === "discovery" && m.status === "resolved")).toHaveLength(1);
+    await r.pollOnce(); // chains hunt #2 right away — interval is NOT waited
+    expect(missions.recent(10).filter((m) => m.kind === "discovery")).toHaveLength(2);
   });
 
   it("DEEPDIVE: batched per-coin verdicts are applied through the advisory path", async () => {

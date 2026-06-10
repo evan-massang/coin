@@ -223,21 +223,22 @@ export class ManusMissionRunner {
     if (this.polling || !this.available()) return; // never overlap ticks
     this.polling = true;
     try {
-      // Recurring discovery: one mission in flight at a time, re-dispatched once
-      // the interval has elapsed since the last one was CREATED.
+      // CONTINUOUS chaining (operator: "every time after the result got received,
+      // do it again and repeat"): the next mission of each kind dispatches the
+      // moment none is in flight — a RESOLVED mission chains immediately; after a
+      // FAILED/cancelled one the interval setting acts as a cooldown so a broken
+      // dispatch can't spin-burn credits.
       if (this.svc.settings.get("manusDiscoveryEnabled") && !this.svc.missions.hasActiveOfKind("discovery")) {
         const last = this.svc.missions.latestByKind("discovery");
-        const intervalMs = this.svc.settings.get("manusDiscoveryIntervalMin") * 60_000;
-        if (!last || this.now() - last.createdAt >= intervalMs) {
-          await this.dispatchDiscovery("auto");
-        }
+        const cooldownMs = this.svc.settings.get("manusDiscoveryIntervalMin") * 60_000;
+        const ready = !last || last.status === "resolved" || (last.resolvedAt ?? last.createdAt) + cooldownMs <= this.now();
+        if (ready) await this.dispatchDiscovery("auto");
       }
-      // Recurring BATCHED deep-dives (fully autonomous — operator: "run it all"):
-      // every N minutes, one mission hard-reviews ALL open paper positions.
       const ddMin = this.svc.settings.get("manusAutoDeepdiveMin");
       if (ddMin > 0 && !this.svc.missions.hasActiveOfKind("deepdive")) {
         const lastDd = this.svc.missions.latestByKind("deepdive");
-        if (!lastDd || this.now() - lastDd.createdAt >= ddMin * 60_000) {
+        const ready = !lastDd || lastDd.status === "resolved" || (lastDd.resolvedAt ?? lastDd.createdAt) + ddMin * 60_000 <= this.now();
+        if (ready) {
           const open = this.svc.paperPositions
             .byStatus(true)
             .slice(0, 10)

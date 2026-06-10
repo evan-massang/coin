@@ -77,7 +77,6 @@
             <div class="why-verdict" id="why-verdict">—</div>
             <ul class="why-list" id="why-list"><li class="muted">select a token to see the engine's reasoning</li></ul>
             <div class="why-links" id="why-links"></div>
-            <div class="room-actions"><a class="cfg gold" id="send-manus">▸ SEND TO MANUS — research this coin</a></div>
           </div>
           <!-- market regime -->
           <div class="panel">
@@ -123,22 +122,6 @@
                 <div class="sec-label">RECENT CLOSES</div>
                 <table class="feed"><thead><tr><th>TOKEN</th><th>RESULT</th><th>PNL (USD)</th><th>PEAK</th></tr></thead><tbody id="pw-closes"></tbody></table>
               </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ── PROJECT HERMES — Manus live monitor on the MAIN page ── -->
-      <section class="reasongrid">
-        <div class="panel">
-          <div class="panel-head"><span class="tag dark">🛰 MANUS LIVE</span><h2>what Manus is saying right now · <span class="muted small" id="hm-chat-which">—</span></h2><a class="cfg gold" id="open-hermes-main" style="margin-left:auto">▸ MISSIONS &amp; CASE FILES</a></div>
-          <div style="display:flex;gap:14px;flex-wrap:wrap">
-            <div style="flex:1.4;min-width:340px">
-              <div id="hm-chat" style="max-height:280px;overflow-y:auto;border:1px solid #d4ccb4;border-radius:4px;padding:8px;font-size:12px"><div class="muted small">no active Manus task yet — hunts fire automatically</div></div>
-            </div>
-            <div style="flex:1;min-width:300px">
-              <div class="sec-label">ENGINE FEED <span class="muted small" id="hm-next-hunt"></span></div>
-              <div id="hm-feed" class="rz-feed" style="max-height:280px;overflow-y:auto"><div class="muted small">loading…</div></div>
             </div>
           </div>
         </div>
@@ -223,6 +206,10 @@
             <button class="btn ghost" type="button" id="hm-attach-btn">📎 ATTACH task</button>
             <span class="muted small" id="hm-out3"></span>
           </div>
+          <div class="sec-label" style="margin-top:16px">🛰 MANUS LIVE — what Manus is saying right now <span class="muted small" id="hm-chat-which"></span></div>
+          <div id="hm-chat" style="max-height:240px;overflow-y:auto;border:1px solid #d4ccb4;border-radius:4px;padding:8px;font-size:12px"><div class="muted small">no active Manus task yet — missions chain automatically</div></div>
+          <div class="sec-label" style="margin-top:12px">ENGINE FEED — what came back &amp; what got injected <span class="muted small" id="hm-next-hunt"></span></div>
+          <div id="hm-feed" class="rz-feed" style="max-height:200px;overflow-y:auto"><div class="muted small">loading…</div></div>
           <div class="sec-label" style="margin-top:16px">HUNT RESULTS — latest resolved discovery</div>
           <div id="hm-hunt"><div class="muted small">no resolved hunts yet — click 🔭 DISCOVER or wait for the hourly hunt</div></div>
           <div id="hm-mission" style="margin-top:10px"></div>

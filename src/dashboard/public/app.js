@@ -491,14 +491,35 @@ function setLiveBtn() { const b = $("#ch-live"); if (b) b.classList.toggle("rz-o
 function paperPosRow(p) {
   const mult = p.entryPriceUsd > 0 && p.lastPriceUsd ? p.lastPriceUsd / p.entryPriceUsd : 1;
   const pnlPct = (mult - 1) * 100;
-  return `<tr>
-    <td><b>$${esc(p.symbol || p.mint.slice(0, 5))}</b></td>
+  return `<tr class="pw-pos" data-mint="${esc(p.mint)}" style="cursor:pointer" title="click: why are we still holding this?">
+    <td><b>$${esc(p.symbol || p.mint.slice(0, 5))}</b> <span class="muted small">▾</span></td>
     <td class="muted">${ageStr(p.entryAtMs)}</td>
     <td>${(p.solInvested ?? 0).toFixed(3)}</td>
     <td>${mult.toFixed(2)}x</td>
     <td><span class="${pnlPct >= 0 ? "green" : "red"}">${pctS(pnlPct)}</span></td>
     <td><span class="statepill">${esc(p.status || "OPEN")}</span></td>
   </tr>`;
+}
+// "Why are we still holding this?" dropdown — expands under the clicked position
+// with the exit-condition distances, entry thesis, thesis health, latest research.
+async function toggleWhy(tr, mint) {
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("pw-why")) { next.remove(); return; } // collapse
+  document.querySelectorAll("#pw-positions .pw-why").forEach((x) => x.remove()); // one open at a time
+  const row = document.createElement("tr");
+  row.className = "pw-why";
+  row.innerHTML = `<td colspan="6" class="muted small">loading…</td>`;
+  tr.after(row);
+  const w = await api(`/hermes/why/${mint}`).catch(() => null);
+  if (!w || !w.ok) { row.innerHTML = `<td colspan="6" class="muted small">${esc((w && w.error) || "no data")}</td>`; return; }
+  const health = w.thesisHealth === "thesis-broken" ? `<b style="color:${COL.red}">BROKEN</b>` : w.thesisHealth === "thesis-weakening" ? `<b style="color:${COL.gold}">weakening</b>` : `<b style="color:${COL.green}">${esc(String(w.thesisHealth))}</b>`;
+  row.innerHTML = `<td colspan="6" style="background:rgba(0,0,0,0.03);padding:8px 10px">
+    <div><b>why we're ${w.pnlPct != null && w.pnlPct < 0 ? "still holding at " + Math.round(w.pnlPct) + "%" : "holding"}:</b> <span class="${w.bottomLine.includes("condition is met") ? "red" : "muted"} small">${esc(w.bottomLine)}</span></div>
+    <ul class="why-list" style="margin:6px 0">${(w.holding || []).map((h) => `<li class="small">${esc(h)}</li>`).join("")}</ul>
+    ${w.thesis ? `<div class="muted small">entry thesis: ${esc(w.thesis.verdict)}@${w.thesis.conviction} · attention ${w.thesis.attentionAtEntry} — ${esc((w.thesis.reasons || [])[0] || "")}</div>` : `<div class="muted small">no entry thesis journalled</div>`}
+    <div class="muted small">thesis health: ${health}${w.research ? ` · latest research [${esc(w.research.source)}] attention ${w.research.attention}: ${esc(w.research.narrative)}` : ""}</div>
+    ${w.deepdive ? `<div class="small">manus deep-dive: <b style="color:${w.deepdive.recommendation === "confirm" ? COL.green : w.deepdive.recommendation === "avoid" ? COL.red : COL.gold}">${esc(w.deepdive.recommendation)}</b>${w.deepdive.narrative ? ` — ${esc(w.deepdive.narrative)}` : ""}</div>` : ""}
+  </td>`;
 }
 function paperCloseRow(p) {
   const realized = p.realizedPnlUsd ?? 0, win = realized > 0;
@@ -539,9 +560,16 @@ async function renderPaper() {
   $("#pw-open").textContent = st.openCount ?? (p.open || []).length;
   $("#pw-closed").textContent = st.closedCount ?? (p.closed || []).length;
   const open = (p.open || []).slice().sort((a, b) => b.entryAtMs - a.entryAtMs);
+  const expanded = document.querySelector("#pw-positions .pw-why"); // survive the 10s re-render
+  const expandedMint = expanded?.previousElementSibling?.getAttribute("data-mint");
   $("#pw-positions").innerHTML = open.length
     ? open.map(paperPosRow).join("")
     : `<tr><td colspan="6" class="muted small">no open positions — fills appear here when a BUY signal clears the gate</td></tr>`;
+  document.querySelectorAll("#pw-positions .pw-pos").forEach((tr) => (tr.onclick = () => void toggleWhy(tr, tr.getAttribute("data-mint"))));
+  if (expandedMint) {
+    const tr = document.querySelector(`#pw-positions .pw-pos[data-mint="${expandedMint}"]`);
+    if (tr) void toggleWhy(tr, expandedMint);
+  }
   const closed = (p.closed || []).slice(-10).reverse();
   $("#pw-closes").innerHTML = closed.length
     ? closed.map(paperCloseRow).join("")
@@ -681,8 +709,10 @@ async function openHermes(prefillMint) {
   if (prefillMint) $("#hm-mint").value = prefillMint;
   $("#hermes").classList.add("open");
   renderMissions();
+  void renderManusLive();
 }
 async function renderManusLive() {
+  if (!$("#hermes").classList.contains("open")) return; // monitor lives in the Manus tab only
   // Feed: what came back + what got injected + next hunt countdown.
   try {
     const f = await api("/manus/feed");
@@ -831,7 +861,6 @@ async function fireDeepdive() {
   renderMissions();
 }
 $("#open-hermes").onclick = () => openHermes();
-$("#open-hermes-main").onclick = () => openHermes();
 $("#close-hermes").onclick = () => $("#hermes").classList.remove("open");
 $("#hm-compose").onclick = composeMission;
 $("#hm-submit").onclick = submitResult;
@@ -839,7 +868,6 @@ $("#hm-case").onclick = () => loadCase();
 $("#hm-discover").onclick = fireDiscover;
 $("#hm-deepdive").onclick = fireDeepdive;
 $("#hm-attach-btn").onclick = attachTask;
-$("#send-manus").onclick = () => openHermes(STATE.selectedMint || "");
 
 (async function boot() {
   await loadAll(); drawProfitChart(); setLiveBtn(); connectWs();
