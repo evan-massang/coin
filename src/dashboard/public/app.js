@@ -68,6 +68,7 @@ async function loadAll() {
   STATE.status = status; STATE.market = market; STATE.engine = engine; STATE.council = council; STATE.councilStats = councilStats;
   STATE.signals = (signals || []).map((s) => ({ ...s, verdict: s.verdict })).reverse();
   renderEngineState(); renderRegime(); renderCouncil(); renderTable(); renderAlerts(); renderPaper(); renderReasoning();
+  void renderManusLive(); // main-page Manus monitor (chat + feed), same 10s cadence
   api("/paper/series").then((s) => { if (s && s.positions) STATE.series = s; }).catch(() => {});
   // Default selection = highest-conviction recent token.
   if (!STATE.selectedMint && STATE.signals.length) selectToken((topSignal() || STATE.signals[STATE.signals.length - 1]).mint);
@@ -629,6 +630,7 @@ const CFG = [
   { k: "manusDiscoveryEnabled", label: "recurring Manus DISCOVERY hunts (auto, costs credits)", t: "checkbox" },
   { k: "manusDiscoveryIntervalMin", label: "discovery interval (minutes)", t: "number" },
   { k: "manusDiscoveryCandidates", label: "candidates per discovery hunt", t: "number" },
+  { k: "manusAutoDeepdiveMin", label: "auto deep-dive open positions every N min (0=off)", t: "number" },
   { k: "councilAutoDebate", label: "always-on council debate (auto, every coin)", t: "checkbox" },
   { k: "opencodeEnabled", label: "opencode council (GPT/DeepSeek/Qwen)", t: "checkbox" },
   { k: "opencodeAutoServe", label: "auto-start opencode server", t: "checkbox" },
@@ -675,15 +677,10 @@ $("#ch-live").onclick = () => { CHART.live = true; CHART.endAt = Date.now(); set
 // ── Project Hermes: Manus mission board + case file (operator-in-the-loop) ──
 let HM_MISSION = null;
 let HM_CHAT_ID = null; // mission whose live chat is displayed
-let HM_TIMER = null;
 async function openHermes(prefillMint) {
   if (prefillMint) $("#hm-mint").value = prefillMint;
   $("#hermes").classList.add("open");
   renderMissions();
-  renderManusLive();
-  // Live refresh while the overlay is open (chat + feed every 10s).
-  if (HM_TIMER) clearInterval(HM_TIMER);
-  HM_TIMER = setInterval(() => { if ($("#hermes").classList.contains("open")) { renderManusLive(); renderMissions(); } else { clearInterval(HM_TIMER); HM_TIMER = null; } }, 10000);
 }
 async function renderManusLive() {
   // Feed: what came back + what got injected + next hunt countdown.
@@ -698,7 +695,7 @@ async function renderManusLive() {
   try {
     const rows = await api("/manus/missions?limit=20");
     const target = (rows || []).find((m) => m.status === "sent" && m.externalId) || (rows || []).find((m) => m.externalId);
-    if (!target) { $("#hm-chat").innerHTML = `<div class="muted small">no active Manus task — fire 🔭 DISCOVER or 📎 ATTACH one</div>`; return; }
+    if (!target) { $("#hm-chat").innerHTML = `<div class="muted small">no active Manus task yet — hunts fire automatically</div>`; return; }
     HM_CHAT_ID = target.id;
     $("#hm-chat-which").textContent = `· mission #${target.id} (${target.status})${target.externalUrl ? "" : ""}`;
     const c = await api(`/manus/mission/${target.id}/chat`);
@@ -834,6 +831,7 @@ async function fireDeepdive() {
   renderMissions();
 }
 $("#open-hermes").onclick = () => openHermes();
+$("#open-hermes-main").onclick = () => openHermes();
 $("#close-hermes").onclick = () => $("#hermes").classList.remove("open");
 $("#hm-compose").onclick = composeMission;
 $("#hm-submit").onclick = submitResult;

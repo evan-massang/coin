@@ -41,12 +41,15 @@ describe("ManusMissionRunner", () => {
     injectedTokens = [];
     now = 1_000_000;
     const settings = new SettingsStore(db);
-    settings.update({ manusApiKey: "TESTKEY" });
+    // Auto-schedulers off by default in tests (each scheduler test enables its own)
+    // so fetch-script sequences stay deterministic.
+    settings.update({ manusApiKey: "TESTKEY", manusAutoDeepdiveMin: 0 });
     svc = {
       settings,
       missions,
       attention: { injectResult: (rec: { mint: string; source: string; scores: { attention: number } }) => injected.push({ mint: rec.mint, source: rec.source, attention: rec.scores.attention }) },
       runtime: { injectToken: (t: { mint: string; symbol?: string; discoverySource?: string }) => injectedTokens.push(t) },
+      paperPositions: { byStatus: () => [{ mint: "Cc7vCWVQ7AqHxuJYYQFr2Wj1GS66WQfPZcknvBTpump", symbol: "HELD" }] },
       signals: {
         recent: () => [
           { mint: "SeedMint11111111111111111111111111111111111", symbol: "SEED", verdict: "WATCH_ONLY", conviction: 52, flags: ["src:scan"], at: now - 60_000 },
@@ -176,6 +179,21 @@ describe("ManusMissionRunner", () => {
     expect(body.message.content).toMatch(/graduated — real Raydium pool/);
     // Bonding-curve newborns are NEVER seeded (they structurally fail the playbook).
     expect(body.message.content).not.toContain("NewbornMint111111111111111111111111111111111");
+  });
+
+  it("AUTO DEEP-DIVE scheduling: batched review of open positions on its own interval (run it all)", async () => {
+    (svc.settings as SettingsStore).update({ manusDiscoveryEnabled: false, manusAutoDeepdiveMin: 120 });
+    const f = fetchScript([
+      { status: 200, body: { ok: true, task_id: "TDD" } }, // deep-dive dispatch
+      { status: 200, body: { events: [{ type: "status_update", status_update: { agent_status: "running" } }] } },
+    ]);
+    const r = runner(f);
+    await r.pollOnce(); // schedules + dispatches the deep-dive of the open position
+    const dds = missions.recent(10).filter((m) => m.kind === "deepdive");
+    expect(dds).toHaveLength(1);
+    expect(dds[0].status).toBe("sent");
+    await r.pollOnce(); // one in flight → no double dispatch
+    expect(missions.recent(10).filter((m) => m.kind === "deepdive")).toHaveLength(1);
   });
 
   it("DISCOVERY scheduling: auto-dispatches on interval, never doubles up while one is in flight", async () => {

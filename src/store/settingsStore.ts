@@ -194,6 +194,10 @@ export const SettingsSchema = z.object({
   manusDiscoveryIntervalMin: z.number().int().min(15).max(1440).default(60),
   /** How many candidates to ask for per discovery mission (operator: "top 5"). */
   manusDiscoveryCandidates: z.number().int().min(3).max(12).default(5),
+  /** Auto BATCHED deep-dives: every N minutes, ONE mission reviews all open paper
+   *  positions (operator: "ask a bunch at the same time so it's efficient").
+   *  0 = off. Runs only when there are open positions and a key is set. */
+  manusAutoDeepdiveMin: z.number().int().min(0).max(1440).default(120),
 
   // ── AI Council (multi-model; advisory only — never overrides safety/risk) ──
   /** Master switch for the OpenCode-routed council seats (GPT-4o/DeepSeek/Qwen…). */

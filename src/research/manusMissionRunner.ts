@@ -232,6 +232,19 @@ export class ManusMissionRunner {
           await this.dispatchDiscovery("auto");
         }
       }
+      // Recurring BATCHED deep-dives (fully autonomous — operator: "run it all"):
+      // every N minutes, one mission hard-reviews ALL open paper positions.
+      const ddMin = this.svc.settings.get("manusAutoDeepdiveMin");
+      if (ddMin > 0 && !this.svc.missions.hasActiveOfKind("deepdive")) {
+        const lastDd = this.svc.missions.latestByKind("deepdive");
+        if (!lastDd || this.now() - lastDd.createdAt >= ddMin * 60_000) {
+          const open = this.svc.paperPositions
+            .byStatus(true)
+            .slice(0, 10)
+            .map((p) => ({ mint: p.mint, symbol: p.symbol, note: "open paper position" }));
+          if (open.length) await this.dispatchDeepdive(open, "auto");
+        }
+      }
       const sent = this.svc.missions.sentMissions();
       if (!sent.length) return;
       const client = this.client();
