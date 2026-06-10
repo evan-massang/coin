@@ -215,6 +215,45 @@ describe("ManusMissionRunner", () => {
     expect(injected[1]).toMatchObject({ mint: b, source: "manus", attention: 8 }); // avoid verdict lands too
   });
 
+  it("UNSTRUCTURED chat answer: mints are extracted from Manus's TEXT and ingested (the operator-run-chat case)", async () => {
+    const validA = "Cc7vCWVQ7AqHxuJYYQFr2Wj1GS66WQfPZcknvBTpump";
+    const f = fetchScript([
+      { status: 200, body: { ok: true, task_id: "TC" } },
+      { status: 200, body: { events: [
+        { type: "status_update", agent_status: "stopped" },
+        { type: "assistant_message", content: `Here are my picks bruda: $BREAD looks great, contract ${validA}. The rest failed RugCheck.` },
+      ] } },
+    ]);
+    const r = runner(f);
+    const d = await r.dispatchDiscovery("operator"); // simulates an attached task too (same poll path)
+    await r.pollOnce();
+    const row = missions.get(d.id!)!;
+    expect(row.status).toBe("resolved"); // NOT failed — the chat text was ingested
+    expect((row.resultRaw as { unstructured: boolean; mints: string[] }).unstructured).toBe(true);
+    expect((row.resultRaw as { mints: string[] }).mints).toEqual([validA]);
+    expect(injectedTokens.map((t) => t.mint)).toEqual([validA]);
+    expect(injected[0]).toMatchObject({ mint: validA, source: "manus" });
+  });
+
+  it("WAITING task gets auto-nudged with 'continue' (Manus pauses on login walls and sits forever)", async () => {
+    const f = fetchScript([
+      { status: 200, body: { ok: true, task_id: "TW" } }, // dispatch
+      { status: 200, body: { events: [{ type: "status_update", status_update: { agent_status: "waiting" } }] } }, // poll: waiting
+      { status: 200, body: { ok: true } }, // sendMessage nudge
+      { status: 200, body: { events: [{ type: "status_update", status_update: { agent_status: "waiting" } }] } }, // poll 2
+      { status: 200, body: { ok: true } }, // nudge 2
+    ]);
+    const r = runner(f);
+    const d = await r.dispatchDiscovery("operator");
+    await r.pollOnce();
+    await r.pollOnce();
+    const calls = (f as ReturnType<typeof vi.fn>).mock.calls;
+    const nudges = calls.filter(([url]) => String(url).includes("task.sendMessage"));
+    expect(nudges).toHaveLength(2);
+    expect(JSON.parse(nudges[0][1].body).message.content).toMatch(/continue/);
+    expect(missions.get(d.id!)!.status).toBe("sent"); // still polling, not failed
+  });
+
   it("auto-missions respect the hourly cap; operator sends do not", async () => {
     (svc.settings as SettingsStore).update({ manusMaxPerHour: 1 });
     const ok = fetchScript([{ status: 200, body: { ok: true, task_id: "TA" } }]);

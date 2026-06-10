@@ -1,7 +1,7 @@
 import type { Services } from "../services.js";
 import type { Mission } from "./mission.types.js";
 import type { MissionResult, MissionRow } from "../store/repositories/missionRepo.js";
-import { ManusClient, latestAgentStatus, extractStructuredResult, extractErrorMessage } from "./manusClient.js";
+import { ManusClient, latestAgentStatus, extractStructuredResult, extractErrorMessage, extractChatItems, extractAssistantTexts, type ChatItem } from "./manusClient.js";
 import { composeMissionForMint } from "./composeMission.js";
 import { missionToPrompt, MANUS_RECOMMENDATION_SCHEMA } from "./missionPrompt.js";
 import { discoveryPrompt, deepdivePrompt, DISCOVERY_SCHEMA, DEEPDIVE_SCHEMA, type DiscoverySeed } from "./discoveryPrompt.js";
@@ -28,6 +28,8 @@ export class ManusMissionRunner {
   private timer?: NodeJS.Timeout;
   private polling = false;
   private readonly now: () => number;
+  /** Auto-nudge bookkeeping: missionId → "continue" messages sent (capped). */
+  private readonly nudges = new Map<number, number>();
 
   constructor(
     private readonly svc: Services,
@@ -116,6 +118,21 @@ export class ManusMissionRunner {
     } catch (e) {
       this.svc.missions.markFailed(id, (e as Error).message, this.now());
       return { ok: false, id, error: (e as Error).message };
+    }
+  }
+
+  /** Live chat transcript for a mission's Manus task (Hermes Phase 7 — the
+   *  operator watches what Manus is actually saying, in the dashboard). */
+  async getChat(missionId: number): Promise<{ ok: boolean; status?: string; items?: ChatItem[]; error?: string }> {
+    const m = this.svc.missions.get(missionId);
+    if (!m?.externalId) return { ok: false, error: "mission has no Manus task attached" };
+    if (!this.available()) return { ok: false, error: "no Manus API key configured" };
+    try {
+      const events = await this.client().listMessages(m.externalId, 100);
+      // We request order=desc (newest first) — reverse to chat order (oldest first).
+      return { ok: true, status: m.status, items: extractChatItems(events).reverse() };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
     }
   }
 
@@ -230,6 +247,11 @@ export class ManusMissionRunner {
               if (m.kind === "discovery") this.applyDiscovery(m, sr.value as Record<string, unknown>);
               else if (m.kind === "deepdive") this.applyDeepdive(m, sr.value as Record<string, unknown>);
               else this.applyResult(m.id, m.mint, m.symbol, sr.value as Record<string, unknown>);
+            } else if ((m.kind === "discovery" || m.kind === "deepdive") && this.applyChatText(m, events)) {
+              // Unstructured-answer fallback: a task the operator ran themselves
+              // (no schema attached) answers in PROSE — the result used to "just
+              // sit there in the Manus chat". We read the chat text, pull the
+              // Solana addresses out of it, and ingest them as candidates.
             } else {
               this.svc.missions.markFailed(m.id, `task stopped without structured output${sr?.error ? `: ${sr.error}` : ""} (events: ${JSON.stringify(events).slice(0, 300)})`, this.now());
               metrics.inc("manus_task_failed");
@@ -237,6 +259,21 @@ export class ManusMissionRunner {
           } else if (status === "error") {
             this.svc.missions.markFailed(m.id, extractErrorMessage(events) ?? "Manus reported agent_status=error", this.now());
             metrics.inc("manus_task_failed");
+          } else if (status === "waiting") {
+            // Manus pauses on tool limitations (login walls, dynamic pages) and
+            // WAITS for a human — the answer "just sits there" forever. Auto-nudge
+            // it to continue, capped so a truly stuck task still times out.
+            const n = this.nudges.get(m.id) ?? 0;
+            if (n < 3) {
+              this.nudges.set(m.id, n + 1);
+              await client.sendMessage(m.externalId, "continue — work with what you can access, finish the analysis, and deliver the structured output").catch((e) => log.warn(`manus: nudge of #${m.id} failed: ${(e as Error).message}`));
+              metrics.inc("manus_task_nudged");
+              log.info(`manus: mission #${m.id} was WAITING — auto-nudged to continue (${n + 1}/3)`);
+            }
+            if ((m.sentAt ?? m.createdAt) + timeoutMs < this.now()) {
+              this.svc.missions.markFailed(m.id, `timed out while waiting for input despite ${n} auto-nudges`, this.now());
+              metrics.inc("manus_task_timeout");
+            }
           } else if ((m.sentAt ?? m.createdAt) + timeoutMs < this.now()) {
             this.svc.missions.markFailed(m.id, `timed out after ${this.svc.settings.get("manusTimeoutMin")}min (last status: ${status ?? "unknown"})`, this.now());
             metrics.inc("manus_task_timeout");
@@ -321,6 +358,37 @@ export class ManusMissionRunner {
     }
     metrics.inc("manus_discovery_resolved");
     log.ok(`manus: discovery #${m.id} resolved — ${injected} candidate(s) injected into the pipeline${invalid ? `, ${invalid} invalid address(es) skipped` : ""} (reviewed/rejected: ${num(value.rejectedCount, 0)})`);
+  }
+
+  /** Fallback for UNSTRUCTURED answers (operator-run chats have no schema): pull
+   *  Solana mint addresses straight out of Manus's chat text and ingest them as
+   *  candidates. Conservative on the fabrication front — confidence 50, the text
+   *  head as narrative, and reasons say the answer was unstructured; the local
+   *  pipeline still verifies everything on-chain before anything trades. */
+  private applyChatText(m: MissionRow, events: unknown[]): boolean {
+    const texts = extractAssistantTexts(events);
+    if (!texts.length) return false;
+    const all = texts.join("\n");
+    const mints = [...new Set((all.match(/[1-9A-HJ-NP-Za-km-z]{32,44}/g) ?? []).filter((x) => isValidSolanaAddress(x)))].slice(0, 12);
+    if (!mints.length) return false;
+    const now = this.now();
+    const head = all.replace(/\s+/g, " ").slice(0, 400);
+    this.svc.missions.setResultRaw(m.id, { unstructured: true, mints, textHead: head }, "manus", now);
+    for (const mint of mints) {
+      const result: MissionResult = {
+        recommendation: "confirm",
+        confidence: 50,
+        narrative: `from Manus chat: ${head.slice(0, 160)}`,
+        reasons: ["unstructured Manus chat answer — address extracted from text; local on-chain verification only"],
+        provider: "manus",
+      };
+      this.svc.attention?.injectResult(resultToRecord(mint, undefined, result, now));
+      this.svc.runtime.injectToken?.({ mint, seenAt: now, discoverySource: "manus" });
+      metrics.inc("manus_chat_candidate");
+    }
+    metrics.inc("manus_chat_resolved");
+    log.ok(`manus: mission #${m.id} resolved from CHAT TEXT — ${mints.length} address(es) extracted + injected`);
+    return true;
   }
 
   /** Deep-dive resolution: apply each per-coin verdict through the advisory path

@@ -127,6 +127,53 @@ export function manusRoutes(svc: Services): Router {
     res.status(out.ok ? 200 : 409).json(out);
   });
 
+  // Live chat transcript of a mission's Manus task (Phase 7 — watch Manus work).
+  r.get("/manus/mission/:id/chat", async (req, res) => {
+    if (!svc.manus) {
+      res.status(409).json({ ok: false, error: "manus runner not running" });
+      return;
+    }
+    res.json(await svc.manus.getChat(parseInt(req.params.id, 10)));
+  });
+
+  // Engine ingestion feed: what came back, what was injected, when the next hunt fires.
+  r.get("/manus/feed", (_req, res) => {
+    const lines: Array<{ at: number; text: string; tone: "ok" | "warn" | "info" }> = [];
+    for (const m of svc.missions.recent(15)) {
+      const at = m.resolvedAt ?? m.sentAt ?? m.createdAt;
+      if (m.status === "sent") {
+        lines.push({ at, text: `⏳ #${m.id} [${m.kind}] Manus working…`, tone: "info" });
+      } else if (m.status === "failed") {
+        lines.push({ at, text: `✗ #${m.id} [${m.kind}] failed: ${(m.error ?? "?").slice(0, 90)}`, tone: "warn" });
+      } else if (m.status === "resolved" && (m.kind === "discovery" || m.kind === "deepdive")) {
+        const raw = (m.resultRaw ?? {}) as { candidates?: Array<Record<string, unknown>>; results?: Array<Record<string, unknown>>; mints?: string[]; rejectedCount?: number; unstructured?: boolean };
+        const items = raw.candidates ?? raw.results ?? [];
+        if (raw.unstructured && raw.mints) {
+          lines.push({ at, text: `📦 #${m.id} chat answer ingested — ${raw.mints.length} address(es) extracted from Manus text`, tone: "ok" });
+        } else if (items.length) {
+          lines.push({ at, text: `🔭 #${m.id} [${m.kind}] resolved — ${items.length} pick(s)${raw.rejectedCount != null ? `, ${raw.rejectedCount} rejected` : ""}`, tone: "ok" });
+          for (const c of items.slice(0, 6)) {
+            const t = String(c.ticker ?? String(c.contractAddress ?? "").slice(0, 6));
+            const rec = c.recommendation ? ` → ${c.recommendation}` : "";
+            lines.push({ at, text: `   Manus recommended $${t}${rec} (conf ${Math.round(Number(c.confidence ?? 0))}) → injected into the engine`, tone: "ok" });
+          }
+        } else {
+          lines.push({ at, text: `🔭 #${m.id} resolved — zero picks (filters rejected ${raw.rejectedCount ?? "all"})`, tone: "info" });
+        }
+      } else if (m.status === "resolved") {
+        lines.push({ at, text: `🔬 #${m.id} $${m.symbol ?? m.mint.slice(0, 6)} → ${m.result?.recommendation ?? "?"} (conf ${Math.round(m.result?.confidence ?? 0)})`, tone: "ok" });
+      }
+    }
+    // Next recurring hunt ETA.
+    let nextHuntMin: number | null = null;
+    if (svc.settings.get("manusDiscoveryEnabled") && svc.manus?.available()) {
+      const last = svc.missions.latestByKind("discovery");
+      const interval = svc.settings.get("manusDiscoveryIntervalMin") * 60_000;
+      nextHuntMin = svc.missions.hasActiveOfKind("discovery") ? null : Math.max(0, Math.round(((last ? last.createdAt + interval : Date.now()) - Date.now()) / 60_000));
+    }
+    res.json({ lines: lines.sort((a, b) => b.at - a.at).slice(0, 30), nextHuntMin, discoveryEnabled: svc.settings.get("manusDiscoveryEnabled") });
+  });
+
   // Recent missions (newest first); ?status=open for the operator's queue.
   r.get("/manus/missions", (req, res) => {
     const limit = Math.max(1, Math.min(200, parseInt(String(req.query.limit ?? "50"), 10) || 50));

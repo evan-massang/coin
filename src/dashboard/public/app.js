@@ -674,10 +674,45 @@ $("#ch-live").onclick = () => { CHART.live = true; CHART.endAt = Date.now(); set
 
 // ── Project Hermes: Manus mission board + case file (operator-in-the-loop) ──
 let HM_MISSION = null;
+let HM_CHAT_ID = null; // mission whose live chat is displayed
+let HM_TIMER = null;
 async function openHermes(prefillMint) {
   if (prefillMint) $("#hm-mint").value = prefillMint;
   $("#hermes").classList.add("open");
   renderMissions();
+  renderManusLive();
+  // Live refresh while the overlay is open (chat + feed every 10s).
+  if (HM_TIMER) clearInterval(HM_TIMER);
+  HM_TIMER = setInterval(() => { if ($("#hermes").classList.contains("open")) { renderManusLive(); renderMissions(); } else { clearInterval(HM_TIMER); HM_TIMER = null; } }, 10000);
+}
+async function renderManusLive() {
+  // Feed: what came back + what got injected + next hunt countdown.
+  try {
+    const f = await api("/manus/feed");
+    $("#hm-next-hunt").textContent = f.discoveryEnabled ? (f.nextHuntMin == null ? "· hunt in flight" : `· next auto-hunt in ~${f.nextHuntMin}m`) : "· recurring hunts OFF";
+    $("#hm-feed").innerHTML = (f.lines || []).length
+      ? f.lines.map((l) => `<div class="rz-item"><span class="${l.tone === "ok" ? "green" : l.tone === "warn" ? "red" : "muted"}">${esc(l.text)}</span> <span class="muted small">${new Date(l.at).toISOString().slice(11, 16)}</span></div>`).join("")
+      : `<div class="muted small">nothing yet</div>`;
+  } catch { /* engine restarting */ }
+  // Chat: prefer the active (sent) mission, else the newest with a Manus task.
+  try {
+    const rows = await api("/manus/missions?limit=20");
+    const target = (rows || []).find((m) => m.status === "sent" && m.externalId) || (rows || []).find((m) => m.externalId);
+    if (!target) { $("#hm-chat").innerHTML = `<div class="muted small">no active Manus task — fire 🔭 DISCOVER or 📎 ATTACH one</div>`; return; }
+    HM_CHAT_ID = target.id;
+    $("#hm-chat-which").textContent = `· mission #${target.id} (${target.status})${target.externalUrl ? "" : ""}`;
+    const c = await api(`/manus/mission/${target.id}/chat`);
+    if (!c.ok) { $("#hm-chat").innerHTML = `<div class="muted small">chat unavailable: ${esc(c.error || "?")}</div>`; return; }
+    const box = $("#hm-chat");
+    box.innerHTML = (c.items || []).length
+      ? c.items.map((i) => {
+          if (i.kind === "status") return `<div class="muted small">● ${esc(i.text)}</div>`;
+          if (i.kind === "result") return `<div class="green small">📦 ${esc(i.text)}</div>`;
+          return `<div style="margin:4px 0"><b class="gold">manus</b> ${esc(i.text).slice(0, 1200)}</div>`;
+        }).join("")
+      : `<div class="muted small">no messages yet — Manus is starting up</div>`;
+    box.scrollTop = box.scrollHeight; // follow the newest message
+  } catch { /* engine restarting */ }
 }
 async function composeMission() {
   const mint = $("#hm-mint").value.trim();

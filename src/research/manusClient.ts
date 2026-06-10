@@ -82,6 +82,12 @@ export class ManusClient {
     const r = await this.call(`/v2/task.listMessages?task_id=${encodeURIComponent(taskId)}&order=desc&limit=${limit}`, { method: "GET" });
     return parseEvents(r);
   }
+
+  /** Follow-up message into a running/waiting task (used to auto-nudge a paused
+   *  agent with "continue" — Manus pauses on tool limitations and waits). */
+  async sendMessage(taskId: string, content: string): Promise<void> {
+    await this.call("/v2/task.sendMessage", { method: "POST", body: JSON.stringify({ task_id: taskId, message: { content } }) });
+  }
 }
 
 // ── pure, tolerant parsers (unit-tested) ────────────────────────────────────
@@ -137,6 +143,70 @@ export function extractStructuredResult(events: unknown[]): ManusStructuredResul
       error: typeof payload.error === "string" ? payload.error : undefined,
     };
   }
+  return undefined;
+}
+
+export interface ChatItem {
+  kind: "manus" | "status" | "result" | "other";
+  text: string;
+  at?: number;
+}
+
+/** Tolerant extraction of a human-readable chat transcript from a task's events
+ *  (Hermes Phase 7 — the operator watches what Manus is actually saying). Real
+ *  v2 shape (probed live): the payload nests under a key matching the type —
+ *  { type: "assistant_message", assistant_message: { content, attachments },
+ *    timestamp: "1781095851202" } — with STRING-ms timestamps and status briefs. */
+export function extractChatItems(events: unknown[]): ChatItem[] {
+  const items: ChatItem[] = [];
+  for (const ev of events) {
+    if (!ev || typeof ev !== "object") continue;
+    const o = ev as Record<string, unknown>;
+    const at = num(o.created_at) ?? num(o.at) ?? num(o.timestamp);
+    const type = String(o.type ?? o.event ?? "");
+    const payload = (typeof o[type] === "object" && o[type] ? o[type] : o) as Record<string, unknown>;
+    const status = (payload.agent_status ?? o.agent_status ?? (o.data as Record<string, unknown> | undefined)?.agent_status) as string | undefined;
+    if (type === "status_update" || status) {
+      if (status) items.push({ kind: "status", text: typeof payload.brief === "string" && payload.brief ? payload.brief : `agent ${status}`, at });
+      continue;
+    }
+    if (type === "structured_output_result" || o.structured_output_result !== undefined || o.structured_output !== undefined) {
+      items.push({ kind: "result", text: "structured result delivered", at });
+      continue;
+    }
+    const text = textOf(payload) ?? textOf(o);
+    const attachments = Array.isArray(payload.attachments)
+      ? (payload.attachments as Array<Record<string, unknown>>).map((a) => String(a.filename ?? a.type ?? "file")).filter(Boolean)
+      : [];
+    const full = [text, attachments.length ? `📄 ${attachments.join(", ")}` : ""].filter(Boolean).join("\n");
+    if (full) items.push({ kind: type.includes("assistant") || o.role === "assistant" ? "manus" : type.includes("user") || o.role === "user" ? "other" : "manus", text: full, at });
+  }
+  return items;
+}
+
+/** All assistant-authored text in the events (for the unstructured-answer fallback). */
+export function extractAssistantTexts(events: unknown[]): string[] {
+  return extractChatItems(events)
+    .filter((i) => i.kind === "manus")
+    .map((i) => i.text);
+}
+
+function textOf(o: Record<string, unknown>): string | undefined {
+  const c = o.content ?? o.text ?? (o.message as Record<string, unknown> | undefined)?.content;
+  if (typeof c === "string" && c.trim()) return c.trim();
+  if (Array.isArray(c)) {
+    const joined = c
+      .map((p) => (typeof p === "string" ? p : typeof (p as Record<string, unknown>)?.text === "string" ? ((p as Record<string, unknown>).text as string) : ""))
+      .filter(Boolean)
+      .join("\n");
+    if (joined.trim()) return joined.trim();
+  }
+  return undefined;
+}
+
+function num(x: unknown): number | undefined {
+  if (typeof x === "number" && Number.isFinite(x)) return x;
+  if (typeof x === "string" && /^\d{10,16}$/.test(x)) return Number(x); // v2 sends string-ms timestamps
   return undefined;
 }
 

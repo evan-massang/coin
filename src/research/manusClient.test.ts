@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ManusClient, parseEvents, latestAgentStatus, extractStructuredResult, extractErrorMessage } from "./manusClient.js";
+import { ManusClient, parseEvents, latestAgentStatus, extractStructuredResult, extractErrorMessage, extractChatItems, extractAssistantTexts } from "./manusClient.js";
 
 function fetchMock(status: number, body: unknown): typeof fetch {
   return vi.fn(async () => ({
@@ -67,5 +67,39 @@ describe("tolerant event parsing", () => {
   it("extractErrorMessage reads error_message events", () => {
     expect(extractErrorMessage([{ type: "error_message", content: "credits exhausted" }])).toBe("credits exhausted");
     expect(extractErrorMessage([{ type: "assistant_message", content: "hi" }])).toBeUndefined();
+  });
+
+  it("extractChatItems builds a readable transcript (texts, statuses, result marker)", () => {
+    const items = extractChatItems([
+      { type: "assistant_message", content: "Checking RugCheck for the seeds…", created_at: 1 },
+      { type: "status_update", agent_status: "running" },
+      { type: "assistant_message", content: [{ text: "Found a candidate:" }, { text: "$BREAD looks organic" }] },
+      { type: "structured_output_result", success: true, value: {} },
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(["manus", "status", "manus", "result"]);
+    expect(items[0].text).toMatch(/RugCheck/);
+    expect(items[2].text).toMatch(/\$BREAD looks organic/);
+  });
+
+  it("extractChatItems handles the REAL v2 shape (nested payload, string timestamps, status briefs, attachments)", () => {
+    const items = extractChatItems([
+      { type: "status_update", status_update: { agent_status: "stopped", brief: "Manus finished working" }, timestamp: "1781095851202" },
+      { type: "assistant_message", assistant_message: { content: "Top pick is $BREAD", attachments: [{ type: "file", filename: "final_top_5_picks.md" }] }, timestamp: "1781095744000" },
+      { type: "user_message", user_message: { content: "continue", message_type: "text" }, timestamp: "1781095479902" },
+    ]);
+    expect(items[0]).toMatchObject({ kind: "status", text: "Manus finished working" });
+    expect(items[1].kind).toBe("manus");
+    expect(items[1].text).toMatch(/Top pick is \$BREAD/);
+    expect(items[1].text).toMatch(/final_top_5_picks\.md/);
+    expect(items[2]).toMatchObject({ kind: "other", text: "continue" });
+  });
+
+  it("extractAssistantTexts returns only Manus-authored text (fallback ingestion input)", () => {
+    const texts = extractAssistantTexts([
+      { type: "assistant_message", content: "Top pick: mint Cc7vCWVQ7AqHxuJYYQFr2Wj1GS66WQfPZcknvBTpump" },
+      { type: "status_update", agent_status: "stopped" },
+    ]);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain("Cc7vCWVQ");
   });
 });
