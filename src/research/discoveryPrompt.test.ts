@@ -39,28 +39,36 @@ describe("DISCOVERY_SCHEMA / DEEPDIVE_SCHEMA", () => {
   });
 });
 
-describe("discoveryPrompt — the operator playbook, verbatim rules", () => {
-  const p = discoveryPrompt(6);
-  it("contains every hard filter", () => {
-    expect(p).toMatch(/RugCheck\.xyz: mint authority revoked, freeze authority revoked, LP burned or locked/);
-    expect(p).toMatch(/Top 10 holders under 25-30%/);
-    expect(p).toMatch(/No single wallet over 5%/);
-    expect(p).toMatch(/\$30-50k/);
-    expect(p).toMatch(/\$50k-\$500k/);
+describe("discoveryPrompt — the operator's prompt, VERBATIM (street voice, not engineer voice)", () => {
+  const p = discoveryPrompt(5);
+  it("opens exactly like the operator wrote it (engineer-voice rewrites made Manus ask for APIs)", () => {
+    expect(p.startsWith("Go to DexScreener, filter Solana, sort by new pairs.")).toBe(true);
   });
-  it("contains the moon signals + the early-caller edge", () => {
-    expect(p).toMatch(/different writing styles, organic memes/);
-    expect(p).toMatch(/Dead chat = dead coin/);
-    expect(p).toMatch(/mid-tier Crypto Twitter accounts.*BEFORE the big influencers/);
+  it("contains every hard filter, verbatim", () => {
+    expect(p).toContain("Paste the contract into RugCheck.xyz. Mint authority revoked, freeze authority revoked, LP burned or locked.");
+    expect(p).toContain("Top 10 holders under 25-30% combined (not counting the LP pool). No single wallet holding over 5%.");
+    expect(p).toContain("At least $30-50k liquidity, minimum.");
+    expect(p).toContain("$50k-500k market cap with real traction building");
   });
-  it("contains the instant-pass red flags + the ape rule + advisory note", () => {
-    expect(p).toMatch(/100x guaranteed/);
-    expect(p).toMatch(/Dev wallet selling/);
-    expect(p).toMatch(/would not ape into yourself/);
-    expect(p).toMatch(/ADVISORY/);
+  it("contains the moon signals + the early-caller edge, verbatim", () => {
+    expect(p).toContain("real humans posting, different writing styles, organic memes people made themselves");
+    expect(p).toContain("Dead chat = dead coin.");
+    expect(p).toContain("mid-tier callers with real track records are organically mentioning it");
   });
-  it("asks for the requested candidate count", () => {
-    expect(discoveryPrompt(8)).toMatch(/top 8 candidates/);
+  it("contains the instant-pass red flags + the ape rule, verbatim", () => {
+    expect(p).toContain("Anonymous team promising '100x guaranteed'");
+    expect(p).toContain("Dev wallet selling on the chart");
+    expect(p).toContain("Don't send me anything you wouldn't ape into yourself.");
+  });
+  it("asks for the requested candidate count + the contract addresses", () => {
+    expect(discoveryPrompt(5)).toMatch(/top 5 that really have a high chance/);
+    expect(p).toContain("give me the coin address too");
+  });
+  it("seeds ride along in the same casual voice", () => {
+    const seeded = discoveryPrompt(5, [{ mint: "MintXYZ", symbol: "DOGE", note: "graduated" }]);
+    expect(seeded).toContain("our local scanner watches pump.fun and DexScreener in real time");
+    expect(seeded).toContain("MintXYZ");
+    expect(seeded).toContain("skip them freely if they fail anything");
   });
 });
 

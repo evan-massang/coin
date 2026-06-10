@@ -54,55 +54,45 @@ export interface DiscoverySeed {
   note?: string;
 }
 
-/** The operator's hunting playbook, operationalized. `seeds` are minutes-old
- *  candidates from OUR real-time feeds (PumpPortal newborns + the DexScreener
- *  Golden-Filter scanner) — cloud agents can't see hours-old micro-caps through
- *  public APIs (proven by discovery #8: latency/region limits), so the engine
- *  contributes the data edge and Manus contributes verification + social digging. */
+/** The operator's hunting prompt — VERBATIM. The first operationalized rewrite
+ *  made Manus act like an engineer (it asked for APIs and offered "options"
+ *  instead of hunting); the operator's own street-voice text makes it actually
+ *  go to the websites and pick coins. Only additions: the candidate count, a
+ *  casual postscript with our live seeds, and one line about filling the
+ *  structured output. Do NOT "improve" the voice of this prompt. */
 export function discoveryPrompt(candidateCount: number, seeds: DiscoverySeed[] = []): string {
   const seedBlock = seeds.length
     ? `
-LIVE SEED CANDIDATES — start here. These are MINUTES-OLD coins our local real-time
-feeds (pump.fun stream + DexScreener graduate scanner) surfaced just now; public
-APIs you can reach may lag behind them. For EACH seed: paste the mint into
-RugCheck.xyz and DexScreener, then dig the socials. Reject freely — seeds carry
-no presumption of quality:
-${seeds.map((s, i) => `${i + 1}. ${s.symbol ? `$${s.symbol}` : "(unknown ticker)"} — mint: ${s.mint}${s.note ? ` — ${s.note}` : ""}`).join("\n")}
 
-ALSO hunt beyond the seeds wherever you have live data access.
+One more thing — our local scanner watches pump.fun and DexScreener in real time and just flagged these fresh ones minutes ago (public sites might not show them yet). Check these first, same rules, skip them freely if they fail anything:
+${seeds.map((s, i) => `${i + 1}. ${s.symbol ? `$${s.symbol}` : "(no ticker)"} — ${s.mint}${s.note ? ` (${s.note})` : ""}`).join("\n")}
 `
     : "";
-  return `SOLANA MEME-COIN DISCOVERY MISSION — find the next runners BEFORE they run.
-
-You are NOT reviewing a pre-selected coin. Hunt and return the top ${candidateCount} candidates with the highest chance of blowing up in the next hours. Review MANY coins and reject ruthlessly — report how many you rejected.
-${seedBlock}
-WHERE TO HUNT:
-- DexScreener: filter Solana, sort by new pairs. Pump.fun "about to graduate" section — those already survived the worst rug phase. Photon/BullX trending if accessible.
-
-HARD FILTER — before you even consider a coin (any fail = skip, no matter how good it looks):
-1. Paste the contract into RugCheck.xyz: mint authority revoked, freeze authority revoked, LP burned or locked. All three or skip.
-2. Top 10 holders under 25-30% combined (excluding the LP pool). No single wallet over 5%. No bundled-supply flag. Red or yellow on RugCheck → move on; there are a thousand other coins.
-3. Liquidity at least $30-50k. Market cap $50k-$500k — NOT something that already pumped to $10M.
-4. Real two-way volume (not just buys). Holder count growing steadily, not flat.
-5. Chart has actual structure — if it already did a vertical 10x, we are exit liquidity. Skip.
-
-WHAT TELLS YOU IT WILL ACTUALLY MOON:
-- Search the ticker on X: real humans posting, different writing styles, organic memes people made themselves — NOT 50 bot accounts posting the same image with the same caption (paid shilling dies in hours).
-- Telegram/Discord: open it. Actual people chatting, or "wen moon" spam and bots? Dead chat = dead coin.
-- The meme itself has to hit: can you explain why it is funny or interesting in ONE sentence? Is it tied to something happening right now — a trend, an event, a character people know? Meme coins without a hook die in 72 hours; survivors have an identity people want to be part of.
-- The edge: SMALLER/mid-tier Crypto Twitter accounts with real track records organically mentioning it BEFORE the big influencers. Once big names tweet it, their followers are the exit liquidity — we are late. If it is already trending on CT, we missed it.
-
-RED FLAGS — instant pass:
-- Anonymous team promising "100x guaranteed"
-- Identical shill posts across multiple accounts
-- Dev wallet selling on the chart
-- Liquidity shrinking
-- Chart already did a huge vertical move
-- Only hype is about price; nobody talks about the actual meme
-
-FOR EACH CANDIDATE RETURN: exact contract address, market cap + liquidity right now, the RugCheck summary (with link), why the narrative works, the X search link for the ticker, the honest bear case, and your 0-100 scores.
-
-Do NOT send anything you would not ape into yourself. Your output is ADVISORY: the engine re-verifies every claim on-chain (RugCheck, holders, liquidity) and runs its own safety gates before any simulated position — a weak pick wastes everyone's time, so quality over quantity. Respond with the structured output exactly matching the provided schema.`;
+  return `Go to DexScreener, filter Solana, sort by new pairs. Or use Pump.fun and look at the 'about to graduate' section — those already survived the worst rug phase. Photon or BullX are better if you wanna get serious, but DexScreener works.
+Before you even consider a coin, it has to pass this:
+Paste the contract into RugCheck.xyz. Mint authority revoked, freeze authority revoked, LP burned or locked. If any of those three fail, skip it, doesn't matter how good it looks. Top 10 holders under 25-30% combined (not counting the LP pool). No single wallet holding over 5%. No bundled supply flag. If RugCheck shows red or yellow, move on — there's a thousand other coins.
+Liquidity and chart check on DexScreener:
+At least $30-50k liquidity, minimum. Real two-way volume, not just buys. Holder count growing steadily, not flat. Chart should have actual structure, not a vertical candle that already did 10x — if it already pumped, we're exit liquidity.
+Now the stuff that tells you if it'll actually moon:
+Search the ticker on X. I need to see real humans posting, different writing styles, organic memes people made themselves — not 50 bot accounts posting the same image with the same caption. That's paid shilling and it dies in hours.
+Check if there's a Telegram or Discord. Open it. Is it actual people chatting or just 'wen moon' spam and bots? Dead chat = dead coin.
+The meme itself has to actually hit. Can you explain why it's funny or interesting in one sentence? Is it tied to something happening right now — a trend, an event, a character people know? Meme coins without a hook die in 72 hours. The ones that survive have an identity people wanna be part of.
+Look for smaller Crypto Twitter accounts posting it before the big influencers. Once the big names tweet it, we're late — their followers are the exit liquidity. The edge is catching it when mid-tier callers with real track records are organically mentioning it.
+Red flags, instant pass:
+Anonymous team promising '100x guaranteed'
+Identical shill posts across multiple accounts
+Dev wallet selling on the chart
+Liquidity shrinking
+Chart already did a huge vertical move (we're too late)
+Only hype is about price, no one's talking about the actual meme
+When you find one, send me:
+Contract address
+Market cap and liquidity right now
+RugCheck screenshot
+Why you think the narrative works
+Link to the X search for the ticker
+Don't send me anything you wouldn't ape into yourself. And remember — we're looking for one with $50k-500k market cap with real traction building, not something that already pumped to $10M. If it's already trending on CT, we missed it. Just give me the top ${candidateCount} that really have a high chance they're gonna blow up, give me the coin address too.${seedBlock}
+Fill in the structured output for every pick — exact contract address and all the fields (use 0 for a number you couldn't verify).`;
 }
 
 // ── Batched deep-dive (the "really hard opinion" — many coins per mission) ──

@@ -192,8 +192,8 @@ export const SettingsSchema = z.object({
    *  Off by default — each mission costs Manus credits. */
   manusDiscoveryEnabled: z.boolean().default(false),
   manusDiscoveryIntervalMin: z.number().int().min(15).max(1440).default(60),
-  /** How many candidates to ask for per discovery mission. */
-  manusDiscoveryCandidates: z.number().int().min(3).max(12).default(6),
+  /** How many candidates to ask for per discovery mission (operator: "top 5"). */
+  manusDiscoveryCandidates: z.number().int().min(3).max(12).default(5),
 
   // ── AI Council (multi-model; advisory only — never overrides safety/risk) ──
   /** Master switch for the OpenCode-routed council seats (GPT-4o/DeepSeek/Qwen…). */

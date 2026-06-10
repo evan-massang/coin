@@ -169,7 +169,7 @@ describe("ManusMissionRunner", () => {
     await r.dispatchDiscovery("operator");
     const body = JSON.parse((f as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
     expect(body.message.content).toContain("SeedMint11111111111111111111111111111111111");
-    expect(body.message.content).toMatch(/LIVE SEED CANDIDATES/);
+    expect(body.message.content).toMatch(/our local scanner watches pump\.fun/);
     expect(body.message.content).toMatch(/GRADUATED \(golden-filter scanner\)/);
   });
 
