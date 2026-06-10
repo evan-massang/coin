@@ -43,10 +43,17 @@ export class PositionsRepo {
   }
 
   update(p: Position): void {
+    // V5.1 P0 fix: sol_invested/cost_basis_usd were MISSING from this UPDATE, so a
+    // partial sell never persisted its cost-basis reduction — every later sell
+    // re-charged the FULL basis (the per-fill ledger double-counted ~59 SOL of
+    // cost), and buys added onto an existing position never persisted their added
+    // cost. The in-memory math (applyBuy/applySell) was always correct; the write
+    // simply dropped those two columns.
     this.db
       .prepare(
         `UPDATE ${this.table} SET
-           status=@status, token_amount=@tokenAmount, realized_pnl_usd=@realizedPnlUsd,
+           status=@status, token_amount=@tokenAmount, sol_invested=@solInvested,
+           cost_basis_usd=@costBasisUsd, realized_pnl_usd=@realizedPnlUsd,
            peak_price_usd=@peakPriceUsd, last_price_usd=@lastPriceUsd,
            exit_plan=@exitPlan, closed_at_ms=@closedAtMs
          WHERE id=@id`,
@@ -55,6 +62,8 @@ export class PositionsRepo {
         id: p.id,
         status: p.status,
         tokenAmount: p.tokenAmount,
+        solInvested: p.solInvested,
+        costBasisUsd: p.costBasisUsd,
         realizedPnlUsd: p.realizedPnlUsd,
         peakPriceUsd: p.peakPriceUsd,
         lastPriceUsd: p.lastPriceUsd ?? null,

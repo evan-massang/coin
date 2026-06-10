@@ -51,6 +51,8 @@ export class PaperTrader {
   private readonly wallet: PaperWallet;
   private readonly positions: PositionManager;
   private readonly priceLimiter = new RateLimiter(4);
+  /** Per-position in-flight sell lock (V5.1 P0 fix — see executeSell). */
+  private readonly selling = new Set<number>();
 
   constructor(private readonly svc: Services) {
     this.wallet = new PaperWallet(svc.paper);
@@ -129,43 +131,65 @@ export class PaperTrader {
     this.svc.hub.broadcast("paper", { action: "buy", mint: decision.mint });
   }
 
-  /** Wired as the paper ExitEngine's onExit — executes the simulated sale. */
+  /** Wired as the paper ExitEngine's onExit — executes the simulated sale.
+   *
+   *  V5.1 P0 fix (the 54.8-SOL "phantom proceeds" drift): the exit engine
+   *  re-fires full exits EVERY tick by design, and this method used to sell from
+   *  the CALLER'S stale `pos` snapshot while a previous sell was still awaiting
+   *  getSolUsd() — so one position could be fully sold 2-3 times (492 mints sold
+   *  more tokens than they ever bought; ~44.8 SOL of cash credited for tokens
+   *  that never existed; balance/equity displays were fiction). Now: a
+   *  per-position in-flight lock + a FRESH re-read of the position AFTER all
+   *  awaits, with amounts computed from the fresh state only. Token conservation
+   *  (sold ≤ bought) is restored; re-fired ticks become harmless no-ops. */
   async executeSell(pos: Position, signal: ExitSignal): Promise<void> {
-    const s = this.svc.settings.all();
-    const solUsd = await getSolUsd();
-    let priceUsd = pos.lastPriceUsd;
-    if (!priceUsd) {
-      const snap = await this.price(pos.mint);
-      priceUsd = snap?.priceUsd;
+    if (this.selling.has(pos.id)) return; // a sell for this position is already in flight
+    this.selling.add(pos.id);
+    try {
+      const s = this.svc.settings.all();
+      const solUsd = await getSolUsd();
+      let priceUsd = pos.lastPriceUsd;
+      if (!priceUsd) {
+        const snap = await this.price(pos.mint);
+        priceUsd = snap?.priceUsd;
+      }
+      if (!priceUsd) return;
+
+      // ALL awaits are done — re-read the position and compute amounts ONLY from
+      // current truth. No awaits between here and the wallet credit + reduction,
+      // so the credit can never be based on tokens that no longer exist.
+      const fresh = this.svc.paperPositions.get(pos.id);
+      if (!fresh || fresh.status === "CLOSED" || fresh.tokenAmount <= 0) return;
+
+      const sellTokens = Math.min(fresh.tokenAmount, fresh.tokenAmount * signal.sellPct);
+      if (sellTokens <= 0) return;
+      const sim = simulateSell(priceUsd, solUsd, sellTokens, s.paperSlippagePct);
+      const costFraction = fresh.tokenAmount > 0 ? fresh.solInvested * (sellTokens / fresh.tokenAmount) : 0;
+      const realizedSol = sim.solReceived - costFraction;
+
+      this.wallet.credit(sim.solReceived);
+      const now = Date.now();
+      const priceSol = sim.effPriceUsd / solUsd;
+      const res = this.positions.applyActivity(
+        { mint: fresh.mint, side: "sell", tokenAmount: sellTokens, solAmount: sim.solReceived, priceSol, at: now, signature: "paper" },
+        { symbol: fresh.symbol ?? pos.symbol, solUsd },
+      );
+      this.svc.paper.recordFill({
+        mint: fresh.mint,
+        side: "sell",
+        priceUsd: sim.effPriceUsd,
+        solAmount: sim.solReceived,
+        tokenAmount: sellTokens,
+        realizedPnlSol: realizedSol,
+        remainingTokenAmount: res.position?.tokenAmount ?? 0,
+        reason: signal.reason,
+        at: now,
+      });
+      log.info(`paper: ${signal.kind} ${fresh.symbol ?? fresh.mint.slice(0, 8)} (${realizedSol >= 0 ? "+" : ""}${realizedSol.toFixed(3)} SOL)`);
+      this.svc.hub.broadcast("paper", { action: "sell", mint: fresh.mint });
+    } finally {
+      this.selling.delete(pos.id);
     }
-    if (!priceUsd) return;
-
-    const sellTokens = Math.min(pos.tokenAmount, pos.tokenAmount * signal.sellPct);
-    if (sellTokens <= 0) return;
-    const sim = simulateSell(priceUsd, solUsd, sellTokens, s.paperSlippagePct);
-    const costFraction = pos.tokenAmount > 0 ? pos.solInvested * (sellTokens / pos.tokenAmount) : 0;
-    const realizedSol = sim.solReceived - costFraction;
-
-    this.wallet.credit(sim.solReceived);
-    const now = Date.now();
-    const priceSol = sim.effPriceUsd / solUsd;
-    const res = this.positions.applyActivity(
-      { mint: pos.mint, side: "sell", tokenAmount: sellTokens, solAmount: sim.solReceived, priceSol, at: now, signature: "paper" },
-      { symbol: pos.symbol, solUsd },
-    );
-    this.svc.paper.recordFill({
-      mint: pos.mint,
-      side: "sell",
-      priceUsd: sim.effPriceUsd,
-      solAmount: sim.solReceived,
-      tokenAmount: sellTokens,
-      realizedPnlSol: realizedSol,
-      remainingTokenAmount: res.position?.tokenAmount ?? 0,
-      reason: signal.reason,
-      at: now,
-    });
-    log.info(`paper: ${signal.kind} ${pos.symbol ?? pos.mint.slice(0, 8)} (${realizedSol >= 0 ? "+" : ""}${realizedSol.toFixed(3)} SOL)`);
-    this.svc.hub.broadcast("paper", { action: "sell", mint: pos.mint });
   }
 
   private async price(mint: string): Promise<{ priceUsd?: number; liquidityUsd?: number } | undefined> {
