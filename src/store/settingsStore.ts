@@ -178,7 +178,9 @@ export const SettingsSchema = z.object({
   /** Manus API key (open.manus.im). Empty = mission board stays operator-manual. */
   manusApiKey: z.string().default(""),
   manusBaseUrl: z.string().default("https://api.manus.ai"),
-  manusAgentProfile: z.enum(["manus-1.6", "manus-1.6-lite", "manus-1.6-max"]).default("manus-1.6"),
+  /** Operator preference: max — faster and stronger at working around blocked
+   *  tools/login walls (fewer waiting-stalls), at a higher credit cost per task. */
+  manusAgentProfile: z.enum(["manus-1.6", "manus-1.6-lite", "manus-1.6-max"]).default("manus-1.6-max"),
   /** Auto-send a Manus mission when a paper BUY opens (deep-research the coins we
    *  actually hold). Off by default — each mission costs Manus credits. */
   manusAutoMissions: z.boolean().default(false),
