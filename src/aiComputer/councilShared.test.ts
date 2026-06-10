@@ -7,10 +7,12 @@ describe("parseVerdict", () => {
       score: 80, recommendation: "confirm", rationale: "clean",
     });
   });
-  it("clamps score and defaults bad fields", () => {
+  it("clamps score and defaults bad fields (score is authoritative for the verdict)", () => {
     const v = parseVerdict('{"score": 250, "recommendation":"maybe"}')!;
     expect(v.score).toBe(100);
-    expect(v.recommendation).toBe("caution");
+    // Unknown verdict defaults to caution, then the consistency clamp promotes a
+    // 100-score to confirm — the SCORE decides, never free text (teardown fix).
+    expect(v.recommendation).toBe("confirm");
     expect(v.rationale).toBe("no rationale");
   });
   it("non-JSON ⇒ undefined", () => {
@@ -50,9 +52,11 @@ describe("parseDebate", () => {
 });
 
 describe("buildSystemPrompt", () => {
-  it("embeds the seat's role", () => {
-    expect(buildSystemPrompt("risk_analyst")).toContain("RISK ANALYST");
-    expect(buildSystemPrompt("contrarian")).toContain("CONTRARIAN");
+  it("embeds the seat's role as an EVIDENCE job, not a conclusion to perform", () => {
+    expect(buildSystemPrompt("risk_analyst")).toContain("FAILURE-MODE evidence");
+    expect(buildSystemPrompt("contrarian")).toContain("attacks the bull case");
+    // Every seat must be free to reject (the old council had 0 rejects in 5,543).
+    expect(buildSystemPrompt("bull_analyst")).toMatch(/reject/i);
   });
   it("forbids trading + tool use (read-only, advisory)", () => {
     const s = buildSystemPrompt("bull_analyst");

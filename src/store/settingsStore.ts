@@ -217,10 +217,12 @@ export const SettingsSchema = z.object({
   councilMembers: z.array(CouncilMemberConfigSchema).default(DEFAULT_COUNCIL),
   /** Run a 2nd "debate" round where local seats react to each other (Council Room chat). */
   councilDebate: z.boolean().default(true),
-  /** Always-on Council Room: the panel auto-debates the live coins continuously
-   *  (rotating, one at a time) so there's no "run a debate" button — just watch.
-   *  Uses whatever seats are enabled; with local Ollama seats this is free. */
-  councilAutoDebate: z.boolean().default(true),
+  /** Always-on Council Room. DEFAULT OFF since the operator's 5,543-opinion
+   *  teardown proved the always-on panel carried zero information (49% of all
+   *  scores exactly 50; bull seat CONFIRM 98%; 0.7% overlap with actual buys)
+   *  while burning ~1k LLM calls/hour. Manus deep-dives are the second-opinion
+   *  layer now; flip this on only to use the (restructured) panel deliberately. */
+  councilAutoDebate: z.boolean().default(false),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

@@ -183,6 +183,19 @@ export class AiComputer {
 
     // 2. Convene the council over the engine's interpreted evidence (not raw data).
     const evidence = this.councilEvidence(mint);
+    // DATA-SUFFICIENCY GATE (operator teardown: 100% of inputs said "insufficient
+    // data" and five seats dutifully answered "dunno, 50" 5,543 times). No AI runs
+    // on a coin the engine itself hasn't materially observed: require real data
+    // coverage and at least some evidence to weigh. Saves the compute AND the noise.
+    const sufficient = (evidence.coverage ?? 0) >= 50 && evidence.bullCount + evidence.bearCount >= 2;
+    if (!sufficient) {
+      this.results.set(taskId, {
+        taskId, mint, at: Date.now(), evidence: pages,
+        councilEvidence: evidence, evidenceText: buildEvidencePrompt(evidence), transcript: [],
+      });
+      log.info(`ai-computer: council skipped for ${mint.slice(0, 8)} — insufficient data (coverage ${evidence.coverage ?? 0}%, evidence ${evidence.bullCount + evidence.bearCount})`);
+      return;
+    }
     const roster = this.activeRoster();
     // Local `ollama/*` seats talk to Ollama directly — only remote seats need OpenCode.
     const needsOpencode = roster.some((m) => m.provider === "opencode" && !m.model.startsWith("ollama/"));

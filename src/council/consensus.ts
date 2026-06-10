@@ -7,9 +7,11 @@ import type { CouncilMemberResult, CouncilEvidence } from "../aiComputer/council
 export interface Consensus {
   /** Weighted average favourability, 0-100. */
   score: number;
-  recommendation: "confirm" | "caution";
+  recommendation: "confirm" | "caution" | "reject";
   bullModels: number;
   bearModels: number;
+  /** Seats that actively rejected (subset of bearModels). */
+  rejectModels: number;
   /** % of seats agreeing with the majority direction. */
   agreement: number;
   members: number;
@@ -29,14 +31,16 @@ export function buildConsensus(
   const score = Math.round(results.reduce((a, r) => a + r.score * w(r), 0) / totalW);
 
   const bullModels = results.filter((r) => r.recommendation === "confirm").length;
+  const rejectModels = results.filter((r) => r.recommendation === "reject").length;
   const bearModels = results.length - bullModels;
   const agreement = Math.round((Math.max(bullModels, bearModels) / results.length) * 100);
   // Skeptical default: confirm only with a confirming majority AND a healthy
-  // weighted score. Ties / weak scores ⇒ caution.
-  const recommendation = bullModels > bearModels && score >= 55 ? "confirm" : "caution";
+  // weighted score; a rejecting majority is an outright REJECT; else caution.
+  const recommendation: Consensus["recommendation"] =
+    rejectModels * 2 >= results.length ? "reject" : bullModels > bearModels && score >= 55 ? "confirm" : "caution";
 
   const sharedEvidence = (recommendation === "confirm" ? evidence.bullPoints : evidence.bearPoints).slice(0, 3);
-  const rationale = `${bullModels}/${results.length} seats lean bullish · agreement ${agreement}% · weighted ${score}`;
+  const rationale = `${bullModels}/${results.length} bullish · ${rejectModels} reject · agreement ${agreement}% · weighted ${score}`;
 
-  return { score, recommendation, bullModels, bearModels, agreement, members: results.length, sharedEvidence, rationale };
+  return { score, recommendation, bullModels, bearModels, rejectModels, agreement, members: results.length, sharedEvidence, rationale };
 }

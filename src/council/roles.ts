@@ -25,18 +25,24 @@ export const ROLE_LABEL: Record<CouncilRole, string> = {
   lead_reviewer: "Lead Reviewer",
 };
 
-/** Per-seat instruction appended to the shared council system prompt. */
+/** Per-seat instruction appended to the shared council system prompt.
+ *
+ *  REWRITTEN per the operator's 5,543-opinion teardown: "you are the bull
+ *  analyst" made small models PERFORM bullishness (qwen: CONFIRM 1104/1128).
+ *  The persona now shapes WHAT EVIDENCE the seat looks for, never what
+ *  conclusion it reaches — every seat must cite specific evidence from the
+ *  input and is explicitly free (obliged) to reject. */
 export const ROLE_PROMPT: Record<CouncilRole, string> = {
   bull_analyst:
-    "Your seat: BULL ANALYST. Argue the strongest LEGITIMATE bull case — real organic demand, smart-money entry, durable narrative. score = how compelling the bull case actually is (score low and say 'caution' if there is no real bull case).",
+    "Your seat gathers the case FOR buying. List the strongest SPECIFIC evidence in the input that supports buying (organic demand, smart money, durable narrative), then score how strong that case actually is. No real supporting evidence in the input = score under 35 and reject. Your seat does NOT owe anyone a confirm.",
   narrative_analyst:
-    "Your seat: NARRATIVE ANALYST. Judge social/narrative momentum and meme quality only. score = narrative strength (low when the narrative is weak, derivative, or absent).",
+    "Your seat gathers narrative/meme evidence ONLY. Cite the specific narrative facts in the input; score how strong the narrative case is. No narrative evidence present = score under 35 and reject — do not output a default midpoint.",
   risk_analyst:
-    "Your seat: RISK ANALYST. Hunt failure modes — rug patterns, thin liquidity, dev dumps, bundled/sniper clusters, unverified data. score = SAFETY (HIGH means LOW risk; LOW means dangerous). Say 'caution' whenever risk is material.",
+    "Your seat gathers FAILURE-MODE evidence: rug patterns, thin liquidity, dev dumps, cluster buys, unverified data. Cite the specific red flags found; score = SAFETY (high only when you found real evidence of safety, not when you found nothing). Material risk found = reject.",
   contrarian:
-    "Your seat: CONTRARIAN. Try to DISPROVE the bull case and the cluster / smart-money signals. score = how much conviction SURVIVES your scrutiny (low if the bull case collapses under pressure).",
+    "Your seat attacks the bull case. Quote the specific claims in the input and say what refutes or survives. score = how much of the case SURVIVES your attack. If the case collapses, score under 35 and reject; if you genuinely cannot attack it, score high — both are useful, a permanent 50 is not.",
   lead_reviewer:
-    "Your seat: LEAD REVIEWER. Give one balanced second opinion weighing bull and bear evidence even-handedly. score = overall favourability.",
+    "Your seat weighs the OTHER seats' cited evidence. Score the overall case strictly from what was cited — uncited claims count as absent. You hold the panel's last word: reject freely; confirm ONLY when cited evidence clearly supports it.",
 };
 
 export const PROVIDERS = ["anthropic", "opencode"] as const;

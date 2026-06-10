@@ -13,7 +13,7 @@ export interface CouncilOpinionInput {
   role: string;
   model?: string;
   score: number;
-  recommendation: "confirm" | "caution";
+  recommendation: "confirm" | "caution" | "reject";
   rationale: string;
 }
 
@@ -22,6 +22,9 @@ export interface CouncilOpinionRow extends CouncilOpinionInput {
   outcome?: "win" | "loss";
   maxGainPct?: number;
 }
+
+// rowToOpinion casts recommendation through this set; unknown → caution.
+const REC_VALUES = new Set(["confirm", "caution", "reject"]);
 
 export interface MemberStat {
   memberId: string;
@@ -35,6 +38,11 @@ export interface MemberStat {
   falsePositives: number; // confirm → loss
   falseNegatives: number; // caution → win
   weight: number; // bounded dynamic weight
+  /** SANITY ALARM (operator teardown): a seat that hasn't varied in 100+ calls is
+   *  broken by definition — qwen said CONFIRM 1104/1128; llama scored exactly 50
+   *  in 1116/1126. True when (n≥100) and one verdict OR one exact score exceeds
+   *  90% concentration. */
+  collapsed: boolean;
 }
 
 const MIN_RESOLVED_FOR_WEIGHT = 8;
@@ -83,23 +91,34 @@ export class CouncilRepo {
                 COUNT(*) AS total,
                 SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END) AS resolved,
                 SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN (recommendation='confirm' AND outcome='win') OR (recommendation='caution' AND outcome='loss') THEN 1 ELSE 0 END) AS correct,
+                SUM(CASE WHEN (recommendation='confirm' AND outcome='win') OR (recommendation!='confirm' AND outcome='loss') THEN 1 ELSE 0 END) AS correct,
                 SUM(CASE WHEN recommendation='confirm' AND outcome='loss' THEN 1 ELSE 0 END) AS fp,
-                SUM(CASE WHEN recommendation='caution' AND outcome='win' THEN 1 ELSE 0 END) AS fn,
-                AVG(score) AS avg_score
-         FROM council_opinions GROUP BY member_id, label, role`,
+                SUM(CASE WHEN recommendation!='confirm' AND outcome='win' THEN 1 ELSE 0 END) AS fn,
+                AVG(score) AS avg_score,
+                MAX(rec_n) AS max_rec_n,
+                MAX(score_n) AS max_score_n
+         FROM (
+           SELECT *,
+             COUNT(*) OVER (PARTITION BY member_id, recommendation) AS rec_n,
+             COUNT(*) OVER (PARTITION BY member_id, score) AS score_n
+           FROM council_opinions
+         ) GROUP BY member_id, label, role`,
       )
       .all() as Array<Record<string, number | string | null>>;
     return rows.map((r) => {
       const resolved = Number(r.resolved) || 0;
+      const total = Number(r.total) || 0;
       const correct = Number(r.correct) || 0;
       const accuracy = resolved ? correct / resolved : 0;
       const weight = resolved >= MIN_RESOLVED_FOR_WEIGHT ? clamp(accuracy * 1.5 + 0.25, 0.4, 1.6) : 1;
+      // Concentration-based: >90% one verdict (qwen 97.9%, qwen-lead 94.3%) or
+      // >90% one exact score (llama: 99% exactly 50 across 8 nominal values).
+      const collapsed = total >= 100 && ((Number(r.max_rec_n) || 0) / total > 0.9 || (Number(r.max_score_n) || 0) / total > 0.9);
       return {
         memberId: String(r.member_id),
         label: String(r.label ?? r.member_id),
         role: String(r.role ?? ""),
-        total: Number(r.total) || 0,
+        total,
         resolved,
         wins: Number(r.wins) || 0,
         accuracy,
@@ -107,6 +126,7 @@ export class CouncilRepo {
         falsePositives: Number(r.fp) || 0,
         falseNegatives: Number(r.fn) || 0,
         weight,
+        collapsed,
       };
     });
   }
@@ -134,7 +154,7 @@ function rowToOpinion(r: Record<string, unknown>): CouncilOpinionRow {
     role: (r.role as string) ?? "",
     model: (r.model as string) ?? undefined,
     score: r.score as number,
-    recommendation: (r.recommendation as "confirm" | "caution") ?? "caution",
+    recommendation: REC_VALUES.has(String(r.recommendation)) ? (r.recommendation as "confirm" | "caution" | "reject") : "caution",
     rationale: (r.rationale as string) ?? "",
     outcome: (r.outcome as "win" | "loss") ?? undefined,
     maxGainPct: (r.max_gain_pct as number) ?? undefined,
