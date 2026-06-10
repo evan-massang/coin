@@ -399,6 +399,31 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_missions_mint ON missions(mint, created_at);
     `,
   },
+  {
+    version: 13,
+    up: /* sql */ `
+      -- Hermes automated Manus pipeline: external task refs + failure reason.
+      ALTER TABLE missions ADD COLUMN external_id TEXT;
+      ALTER TABLE missions ADD COLUMN external_url TEXT;
+      ALTER TABLE missions ADD COLUMN sent_at INTEGER;
+      ALTER TABLE missions ADD COLUMN error TEXT;
+
+      -- V5.1 Phase 8 (audit finding: research history was last-writer-wins and lost).
+      -- Append-only log of EVERY research result incl. provider provenance, so a
+      -- Manus read can never be silently overwritten by a later Athena pass.
+      CREATE TABLE IF NOT EXISTS attention_research_history (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        mint       TEXT NOT NULL,
+        at         INTEGER NOT NULL,
+        source     TEXT NOT NULL,
+        attention  REAL NOT NULL,
+        confidence REAL NOT NULL,
+        narrative  TEXT,
+        scores_json TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_attn_hist_mint ON attention_research_history(mint, at);
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

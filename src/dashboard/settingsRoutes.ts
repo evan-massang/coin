@@ -25,7 +25,15 @@ export function settingsRoutes(svc: Services): Router {
     for (const k of SECRET_KEYS) {
       if (patch[k] !== undefined && patch[k] === "") delete patch[k];
     }
-    const changes = svc.settings.update(patch, "user");
+    // update() rejects values the partial schema can't (non-finite numbers like
+    // JSON 1e999 → Infinity) — surface that as a clean 400, not a 500.
+    let changes;
+    try {
+      changes = svc.settings.update(patch, "user");
+    } catch (e) {
+      res.status(400).json({ ok: false, error: (e as Error).message });
+      return;
+    }
 
     // BUGFIX: enabling paper / changing the starting balance must initialize the
     // sim wallet immediately, else /api/paper reports 0 SOL until a restart or

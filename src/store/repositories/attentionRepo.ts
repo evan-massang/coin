@@ -35,7 +35,11 @@ function rowToRecord(r: Row): AttentionRecord {
   return {
     mint: r.mint,
     at: r.at,
-    source: r.source === "llm" ? "llm" : "heuristic",
+    // Provenance is preserved verbatim (V5.1 audit fix): the column always stored
+    // the true source ("manus", "heuristic", "llm", …) but this mapper used to
+    // coerce every read to heuristic/llm — so a Manus result reloaded as
+    // "heuristic" after a restart and the audit trail lied.
+    source: r.source || "heuristic",
     scores: {
       humanity: r.humanity,
       virality: r.virality,
@@ -57,6 +61,15 @@ export class AttentionRepo {
   upsert(rec: AttentionRecord): void {
     const ev = rec.evidence;
     const trimmed: AttentionEvidence = { ...ev, posts: ev.posts.slice(0, 25) };
+    // V5.1 Phase 8 fix: the snapshot table is last-writer-wins, which silently
+    // DESTROYED research history (a Manus read overwritten by the next Athena
+    // pass). Every result is now also appended to an immutable history log.
+    this.db
+      .prepare(
+        `INSERT INTO attention_research_history(mint, at, source, attention, confidence, narrative, scores_json)
+         VALUES (?,?,?,?,?,?,?)`,
+      )
+      .run(rec.mint, rec.at, rec.source, rec.scores.attention, rec.scores.confidence, rec.scores.narrative ?? null, JSON.stringify(rec.scores));
     this.db
       .prepare(
         `INSERT INTO attention_research(mint,symbol,name,at,source,attention,humanity,virality,outside_crypto,cultural,confidence,narrative,posts_count,platforms,evidence_json)
@@ -97,5 +110,13 @@ export class AttentionRepo {
 
   count(): number {
     return (this.db.prepare("SELECT COUNT(*) AS n FROM attention_research").get() as { n: number }).n;
+  }
+
+  /** Full research history for one mint, oldest→newest (Phase 8 — nothing hidden). */
+  history(mint: string, limit = 50): Array<{ at: number; source: string; attention: number; confidence: number; narrative?: string }> {
+    const rows = this.db
+      .prepare("SELECT at, source, attention, confidence, narrative FROM attention_research_history WHERE mint=? ORDER BY at ASC LIMIT ?")
+      .all(mint, limit) as Array<{ at: number; source: string; attention: number; confidence: number; narrative: string | null }>;
+    return rows.map((r) => ({ at: r.at, source: r.source, attention: r.attention, confidence: r.confidence, narrative: r.narrative ?? undefined }));
   }
 }

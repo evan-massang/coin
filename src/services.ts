@@ -39,6 +39,9 @@ export interface RuntimeState {
   engineState: EngineState;
   /** Latest classified market regime (set by the /market route) — council context. */
   marketRegime?: string;
+  /** Is this mint still tracked by the entry pipeline? (set by EntryPipeline.start;
+   *  lets the mission board report honestly whether a result can still re-score.) */
+  isTracked?: (mint: string) => boolean;
 }
 
 /**
@@ -73,6 +76,9 @@ export interface Services {
   /** Attention Intelligence research service (Project Athena). Attached in index.ts
    *  so the engine container stays free of the optional browser/LLM dependencies. */
   attention?: AttentionService;
+  /** Automated Manus mission runner (Project Hermes). Attached in index.ts; absent
+   *  in dashboard-only mode. Advisory-only by construction. */
+  manus?: import("./research/manusMissionRunner.js").ManusMissionRunner;
   /** Durable attention research store (Project Athena meme graveyard). */
   attentionRepo: AttentionRepo;
 }

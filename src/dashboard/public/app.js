@@ -622,6 +622,10 @@ const CFG = [
   { k: "heliusApiKey", label: "helius key", t: "secret" },
   { k: "anthropicApiKey", label: "anthropic key (Claude seat)", t: "secret" },
   { k: "rugcheckApiKey", label: "rugcheck key", t: "secret" },
+  { k: "manusApiKey", label: "Manus API key (automated missions)", t: "secret" },
+  { k: "manusAgentProfile", label: "Manus agent profile", t: "select", opts: ["manus-1.6", "manus-1.6-lite", "manus-1.6-max"] },
+  { k: "manusAutoMissions", label: "auto-send Manus mission on every paper BUY (costs credits)", t: "checkbox" },
+  { k: "manusMaxPerHour", label: "Manus auto-missions max/hour", t: "number" },
   { k: "councilAutoDebate", label: "always-on council debate (auto, every coin)", t: "checkbox" },
   { k: "opencodeEnabled", label: "opencode council (GPT/DeepSeek/Qwen)", t: "checkbox" },
   { k: "opencodeAutoServe", label: "auto-start opencode server", t: "checkbox" },
@@ -679,7 +683,9 @@ async function composeMission() {
   const r = await api("/manus/mission", { method: "POST", body: { mint } });
   if (!r.ok) { $("#hm-out").textContent = `error: ${r.error}`; $("#hm-mission").innerHTML = ""; $("#hm-result-wrap").style.display = "none"; HM_MISSION = null; return; }
   HM_MISSION = r;
-  $("#hm-out").innerHTML = `<span class="green">mission #${r.id} composed</span>`;
+  $("#hm-out").innerHTML = r.sent
+    ? `<span class="green">mission #${r.id} → sent to Manus</span>${r.taskUrl ? ` · <a class="cfg gold" href="${esc(r.taskUrl)}" target="_blank" rel="noopener">🛰 watch Manus live</a>` : ""}`
+    : `<span class="green">mission #${r.id} composed</span>${r.manusConfigured ? ` <span class="red">(dispatch failed: ${esc(r.sendError || "?")})</span>` : ` <span class="muted small">(no Manus key — manual board mode)</span>`}`;
   const m = r.mission;
   const card = (b) => `<div style="border:1px solid ${b.thin ? COL.red : COL.line};border-radius:4px;padding:6px 8px;min-width:150px;flex:1 1 180px">
       <div class="small" style="color:${b.thin ? COL.red : COL.green}"><b>${esc(b.key)}</b> · ${Math.round(b.coverage * 100)}%${b.thin ? " ⚠ thin" : ""}</div>
@@ -689,6 +695,7 @@ async function composeMission() {
     <div style="display:flex;flex-wrap:wrap;gap:8px">${m.buckets.map(card).join("")}</div>
     <div class="muted small" style="margin-top:8px">gaps to verify: <b>${m.gaps.length ? esc(m.gaps.join(", ")) : "none"}</b></div>
     <div class="muted small" style="margin-top:4px">output contract: <code>${esc(m.outputContract)}</code></div>`;
+  // Manual paste stays available as the fallback/override even when dispatched.
   $("#hm-result-wrap").style.display = "";
 }
 async function submitResult() {
@@ -706,7 +713,10 @@ async function renderMissions() {
     ? rows.map((m) => {
         const v = (m.mission && m.mission.verdict) || m.verdict || "?";
         const res = m.result ? ` · <b style="color:${m.result.recommendation === "confirm" ? COL.green : m.result.recommendation === "avoid" ? COL.red : COL.gold}">${esc(m.result.recommendation)}</b> (${esc(m.provider || "manus")})` : "";
-        return `<div class="rz-item" data-mint="${esc(m.mint)}" style="cursor:pointer"><b>$${esc(m.symbol || m.mint.slice(0, 6))}</b> <span class="muted">#${m.id}</span> · ${esc(v)} · <span class="${m.status === "resolved" ? "green" : "gold"}">${esc(m.status)}</span>${res}</div>`;
+        const stCol = m.status === "resolved" ? "green" : m.status === "failed" ? "red" : "gold";
+        const live = m.externalUrl && (m.status === "sent" || m.status === "resolved") ? ` · <a class="cfg gold" href="${esc(m.externalUrl)}" target="_blank" rel="noopener">🛰 live</a>` : "";
+        const err = m.status === "failed" && m.error ? ` · <span class="red small">${esc(m.error.slice(0, 80))}</span>` : "";
+        return `<div class="rz-item" data-mint="${esc(m.mint)}" style="cursor:pointer"><b>$${esc(m.symbol || m.mint.slice(0, 6))}</b> <span class="muted">#${m.id}</span> · ${esc(v)} · <span class="${stCol}">${esc(m.status)}</span>${res}${live}${err}</div>`;
       }).join("")
     : `<div class="muted small">no missions yet — compose one above</div>`;
   $("#hm-list").querySelectorAll(".rz-item[data-mint]").forEach((el) => (el.onclick = () => { $("#hm-mint").value = el.getAttribute("data-mint"); loadCase(); }));

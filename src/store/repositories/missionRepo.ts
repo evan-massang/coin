@@ -7,7 +7,7 @@ import type { Mission } from "../../research/mission.types.js";
 // so it re-scores the coin through decide() — this table is the audit trail, not
 // an execution path.
 
-export type MissionStatus = "open" | "resolved" | "cancelled";
+export type MissionStatus = "open" | "sent" | "resolved" | "cancelled" | "failed";
 
 export interface MissionResult {
   recommendation: "confirm" | "caution" | "unsure" | "avoid";
@@ -33,6 +33,12 @@ export interface MissionRow {
   provider?: string;
   createdAt: number;
   resolvedAt?: number;
+  /** Remote task id (Manus task_id) when dispatched via the API. */
+  externalId?: string;
+  /** Remote task URL — the operator's "watch Manus live" link. */
+  externalUrl?: string;
+  sentAt?: number;
+  error?: string;
 }
 
 export class MissionRepo {
@@ -81,10 +87,42 @@ export class MissionRepo {
     return rows.map(rowToMission);
   }
 
-  setResult(id: number, result: MissionResult, resolvedAt: number): void {
-    this.db
-      .prepare(`UPDATE missions SET result_json=?, provider=?, status='resolved', resolved_at=? WHERE id=?`)
+  /** Resolve a mission. Guarded: only an OPEN or SENT mission can be resolved —
+   *  a resolved mission can never be re-resolved/re-injected (red-team finding). */
+  setResult(id: number, result: MissionResult, resolvedAt: number): boolean {
+    const info = this.db
+      .prepare(`UPDATE missions SET result_json=?, provider=?, status='resolved', resolved_at=? WHERE id=? AND status IN ('open','sent')`)
       .run(JSON.stringify(result), result.provider ?? "manus", resolvedAt, id);
+    return info.changes > 0;
+  }
+
+  /** Mark a mission dispatched to a remote provider (Manus task created). */
+  setSent(id: number, externalId: string, externalUrl: string | undefined, at: number): boolean {
+    const info = this.db
+      .prepare(`UPDATE missions SET status='sent', external_id=?, external_url=?, sent_at=?, provider='manus' WHERE id=? AND status='open'`)
+      .run(externalId, externalUrl ?? null, at, id);
+    return info.changes > 0;
+  }
+
+  /** Record a dispatch/poll failure (audit trail; mission leaves the poll set). */
+  markFailed(id: number, reason: string, at: number): boolean {
+    const info = this.db
+      .prepare(`UPDATE missions SET status='failed', error=?, resolved_at=? WHERE id=? AND status IN ('open','sent')`)
+      .run(reason.slice(0, 500), at, id);
+    return info.changes > 0;
+  }
+
+  /** Missions awaiting a remote result (the poll set), oldest first. */
+  sentMissions(limit = 50): MissionRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM missions WHERE status='sent' ORDER BY sent_at ASC LIMIT ?")
+      .all(limit) as Record<string, unknown>[];
+    return rows.map(rowToMission);
+  }
+
+  /** Remote dispatches in a window — the auto-mission hourly cap. */
+  countSentSince(ts: number): number {
+    return (this.db.prepare("SELECT COUNT(*) AS n FROM missions WHERE sent_at IS NOT NULL AND sent_at >= ?").get(ts) as { n: number }).n;
   }
 
   cancel(id: number): void {
@@ -114,5 +152,9 @@ function rowToMission(r: Record<string, unknown>): MissionRow {
     provider: (r.provider as string) ?? undefined,
     createdAt: r.created_at as number,
     resolvedAt: (r.resolved_at as number) ?? undefined,
+    externalId: (r.external_id as string) ?? undefined,
+    externalUrl: (r.external_url as string) ?? undefined,
+    sentAt: (r.sent_at as number) ?? undefined,
+    error: (r.error as string) ?? undefined,
   };
 }

@@ -96,6 +96,9 @@ export class EntryPipeline {
   }
 
   start(): void {
+    // Expose tracking state to read-only consumers (the mission board reports
+    // honestly whether a pasted result can still re-score a coin).
+    this.svc.runtime.isTracked = (mint: string) => this.sm.has(mint);
     this.pump.on({
       onNewToken: (t) => void this.handleNewToken(t),
       onTrade: (t) => this.handleTrade(t),
@@ -124,16 +127,30 @@ export class EntryPipeline {
    *  would-be buy at WATCH (no research yet), and attention now confirms a BUY, this
    *  recomputes risk sizing and EXECUTES the attention-informed buy — so attention
    *  genuinely gates the executed trade. Only executes on a non-buy→buy UPGRADE, so a
-   *  coin already bought via the normal path is never double-filled. */
-  rescoreWithAttention(mint: string, att: { attention: number; confidence: number; narrative: string }): void {
+   *  coin already bought via the normal path is never double-filled.
+   *  Returns an HONEST status (V5.1 audit fix — callers used to claim "rescored"
+   *  even when the token was pruned and nothing happened). */
+  async rescoreWithAttention(
+    mint: string,
+    att: { attention: number; confidence: number; narrative: string },
+    source?: string,
+  ): Promise<"untracked" | "unchanged" | "rescored" | "executed"> {
     const t = this.sm.get(mint);
-    if (!t?.lastDecision || !t.stage1 || !t.lastConfidence) return;
+    if (!t?.lastDecision || !t.stage1 || !t.lastConfidence) return "untracked";
     const prev = t.lastDecision;
     const s = this.svc.settings.all();
     // Carry forward the prior flags but DROP "awaiting-attention" — research has now
     // run, so that hold no longer applies; leaving it would mislabel the re-scored
     // decision as still waiting. Dedupe so repeated scores don't stack duplicates.
-    const carriedFlags = [...new Set((prev.flags ?? []).filter((f) => f !== "awaiting-attention"))];
+    // Research-source provenance (V5.1 audit fix): tag the decision with WHO
+    // produced the attention read ("research:manus" / "research:heuristic"), so a
+    // journalled BUY is attributable to its researcher forever.
+    const carriedFlags = [
+      ...new Set([
+        ...(prev.flags ?? []).filter((f) => f !== "awaiting-attention" && !f.startsWith("research:")),
+        ...(source ? [`research:${source}`] : []),
+      ]),
+    ];
     const decision = decide({
       mint,
       symbol: prev.symbol,
@@ -152,7 +169,7 @@ export class EntryPipeline {
     const changed = decision.verdict !== prev.verdict || Math.abs(decision.conviction - prev.conviction) >= 3;
     if (!changed) {
       t.lastDecision = { ...prev, scores: decision.scores }; // keep attention score visible
-      return;
+      return "unchanged";
     }
     const nowBuy = decision.verdict === "BUY_SMALL" || decision.verdict === "BUY_STRONG";
     const wasBuy = prev.verdict === "BUY_SMALL" || prev.verdict === "BUY_STRONG";
@@ -176,7 +193,17 @@ export class EntryPipeline {
     decision.reasons = [`attention re-score (${prev.verdict}→${decision.verdict}): ${att.narrative}`, ...decision.reasons].slice(0, 6);
     t.lastDecision = decision;
     metrics.inc(`rescore_${decision.verdict}`);
-    this.svc.dispatcher.dispatch(decision);
+    // Price the re-scored signal (V5.1 P0 fix). This dispatch used to omit
+    // priceAtAlert, so EVERY rescored signal — including every attention-gated
+    // executed buy — journalled with a NULL price and was permanently invisible
+    // to the OutcomeTracker, buyStats/market-weather, and the learning loop: the
+    // engine was calibrating on a population it no longer trades. Fetched
+    // directly (not via the shared limiter) because re-scores are rare and this
+    // price is what makes the trade measurable at all.
+    const snap = await fetchDexSnapshot(mint).catch(() => undefined);
+    if (snap) this.svc.tokens.saveSnapshot(snap);
+    decision.pairCreatedAt = snap?.pairCreatedAt ?? prev.pairCreatedAt;
+    this.svc.dispatcher.dispatch(decision, { priceAtAlert: snap?.priceUsd });
     // EXECUTE only on a genuine non-buy→buy UPGRADE — this is what makes attention
     // GATE the executed trade (the readiness gate held the buy at WATCH until research
     // landed). A coin already bought via the normal path (wasBuy) is never double-filled,
@@ -185,7 +212,9 @@ export class EntryPipeline {
     if (nowBuy && !wasBuy && !this.svc.paperPositions.openByMint(mint)) {
       this.hooks.onDecision?.(decision, t);
       metrics.inc("attention_gated_buy");
+      return "executed";
     }
+    return "rescored";
   }
 
   private prune(): void {

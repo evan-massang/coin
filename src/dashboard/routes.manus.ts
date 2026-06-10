@@ -1,68 +1,63 @@
 import { Router } from "express";
 import type { Services } from "../services.js";
-import type { Decision, SafetyResult } from "../types.js";
-import type { AttentionScores, AttentionEvidence } from "../attention/types.js";
-import type { AttentionRecord } from "../attention/attentionService.js";
 import type { MissionResult } from "../store/repositories/missionRepo.js";
-import { clamp01 } from "../attention/types.js";
-import { generateMission } from "../research/missionGenerator.js";
+import { composeMissionForMint } from "../research/composeMission.js";
+import { resultToRecord } from "../research/missionResult.js";
+import { missionToPrompt } from "../research/missionPrompt.js";
 import { isValidSolanaAddress } from "../sources/solanaRpc.js";
 
-// Project Hermes — the Manus mission board (the first concrete, key-free Manus
-// implementation: operator-in-the-loop). The engine composes a structured
-// investigation Mission from what it already knows; the operator runs Manus and
-// pastes the recommendation back; the recommendation flows through the SAME
-// attention re-score path (decide() runs the hard safety gate FIRST), so it is
-// advisory and can never override safety, force a buy, or lower the gate.
+// Project Hermes — the Manus mission board. With a Manus API key configured the
+// mission is dispatched to the Manus API automatically (the operator watches the
+// task live via its task_url); without one it stays the operator-in-the-loop
+// copy-paste board. Either way the recommendation flows through the SAME
+// attention re-score path (decide() runs the hard safety gate FIRST): advisory,
+// can never override safety, force a buy, or lower the gate.
 export function manusRoutes(svc: Services): Router {
   const r = Router();
 
-  // Compose + store a mission for a coin the engine has already scored.
-  r.post("/manus/mission", (req, res) => {
+  // Compose + store a mission; auto-dispatch to the Manus API when available.
+  r.post("/manus/mission", async (req, res) => {
     const mint = typeof req.body?.mint === "string" ? req.body.mint.trim() : "";
     if (!isValidSolanaAddress(mint)) {
       res.status(400).json({ ok: false, error: "invalid mint" });
       return;
     }
-    const history = svc.signals.forMint(mint, 100);
-    const sig = history.at(-1);
-    if (!sig) {
+    const mission = composeMissionForMint(svc, mint, Date.now());
+    if (!mission) {
       res.status(404).json({ ok: false, error: "no signal for this mint yet — the engine must observe + score it first" });
       return;
     }
-    const decision: Decision = {
-      mint: sig.mint,
-      symbol: sig.symbol,
-      verdict: sig.verdict,
-      conviction: sig.conviction,
-      scores: sig.scores,
-      reasons: sig.reasons,
-      flags: sig.flags,
-      caps: sig.caps,
-      redFlags: sig.redFlags,
-      pairCreatedAt: sig.pairCreatedAt,
-      at: sig.at,
-    };
-    // Safety checks aren't journalled; synthesize the gate result we DO know
-    // (pass iff it wasn't an AVOID). Empty checks ⇒ the rugcheck/holders buckets
-    // read as thin, which is honest: it tells Manus to verify them itself.
-    const safety: SafetyResult = {
-      pass: sig.verdict !== "AVOID",
-      stage: 1,
-      checks: [],
-      unknownCount: 0,
-      fatalReasons: [],
-      score: sig.scores.safety ?? 0,
-    };
-    const mission = generateMission({
-      decision,
-      safety,
-      attention: svc.attention?.record(mint),
-      intel: svc.runtime.intel.get(mint),
-      now: Date.now(),
-    });
     const id = svc.missions.insert(mission);
-    res.json({ ok: true, id, mission });
+    let sent = false;
+    let taskUrl: string | undefined;
+    let sendError: string | undefined;
+    if (svc.manus?.available()) {
+      const sendRes = await svc.manus.sendMission(id, "operator");
+      sent = sendRes.ok;
+      taskUrl = sendRes.taskUrl;
+      sendError = sendRes.error;
+    }
+    res.json({ ok: true, id, mission, sent, taskUrl, sendError, manusConfigured: Boolean(svc.manus?.available()) });
+  });
+
+  // The exact prompt a researcher gets for a mission (Phase 8 — nothing hidden).
+  r.get("/manus/mission/:id/prompt", (req, res) => {
+    const row = svc.missions.get(parseInt(req.params.id, 10));
+    if (!row) {
+      res.status(404).json({ ok: false, error: "mission not found" });
+      return;
+    }
+    res.type("text/plain").send(missionToPrompt(row.mission));
+  });
+
+  // Manually dispatch an existing OPEN mission to the Manus API.
+  r.post("/manus/mission/:id/send", async (req, res) => {
+    if (!svc.manus?.available()) {
+      res.status(409).json({ ok: false, error: "no Manus API key configured (CONFIG → Manus API key)" });
+      return;
+    }
+    const out = await svc.manus.sendMission(parseInt(req.params.id, 10), "operator");
+    res.status(out.ok ? 200 : 409).json(out);
   });
 
   // Recent missions (newest first); ?status=open for the operator's queue.
@@ -81,8 +76,8 @@ export function manusRoutes(svc: Services): Router {
     res.json(row);
   });
 
-  // Paste back a recommendation (operator relaying Manus, or any provider). It is
-  // stored AND injected into the attention path so the coin re-scores on merit.
+  // Paste back a recommendation (operator relaying Manus manually). Stored AND
+  // injected into the attention path so the coin re-scores on merit.
   r.post("/manus/mission/:id/result", (req, res) => {
     const id = parseInt(req.params.id, 10);
     const row = svc.missions.get(id);
@@ -110,42 +105,28 @@ export function manusRoutes(svc: Services): Router {
       provider: typeof body.provider === "string" ? body.provider : "manus",
     };
     const now = Date.now();
-    svc.missions.setResult(id, result, now);
-    // Route through the SAME advisory path as any research provider. injectResult
-    // fires onComplete → rescoreWithAttention → decide() (safety gate first), so
-    // this cannot override safety or force a buy.
+    // Guarded: a RESOLVED mission can never be re-resolved/re-injected (red-team fix).
+    if (!svc.missions.setResult(id, result, now)) {
+      res.status(409).json({ ok: false, error: `mission is ${row.status} — results can only be set on open/sent missions` });
+      return;
+    }
+    // Same advisory path as any provider; resultToRecord CLAMPS all scores to
+    // 0..100 before anything touches the engine or the durable graveyard.
     const rec = resultToRecord(row.mint, row.symbol, result, now);
     svc.attention?.injectResult(rec);
-    res.json({ ok: true, resolved: true, rescored: Boolean(svc.attention), attention: rec.scores.attention });
+    // HONEST status (V5.1 audit fix): a result on a pruned coin is cached for any
+    // future evaluation but does NOT immediately re-score — say so, don't claim it did.
+    const tracked = svc.runtime.isTracked?.(row.mint) ?? false;
+    res.json({
+      ok: true,
+      resolved: true,
+      attention: rec.scores.attention,
+      tracked,
+      note: tracked
+        ? "result injected — the engine is re-scoring this coin through its safety gates"
+        : "result cached (graveyard + history); coin is no longer tracked, so no immediate re-score — it applies if the coin is seen again",
+    });
   });
 
   return r;
-}
-
-/** Map a recommendation (+ optional explicit sub-scores) to an AttentionScores. */
-function resultToScores(result: MissionResult): AttentionScores {
-  const recBase: Record<string, number> = { confirm: 78, caution: 45, unsure: 35, avoid: 12 };
-  const base = recBase[result.recommendation] ?? 35;
-  const sc = result.scores ?? {};
-  const attention = num(sc.attention, base);
-  return {
-    humanity: num(sc.humanity, attention),
-    virality: num(sc.virality, attention),
-    outsideCrypto: num(sc.outsideCrypto, attention),
-    culturalStrength: num(sc.culturalStrength, attention),
-    attention,
-    confidence: clamp01((result.confidence ?? 60) / 100),
-    tags: [],
-    narrative: result.narrative ?? `Manus: ${result.recommendation} (confidence ${Math.round(result.confidence)})`,
-    reasons: result.reasons ?? [`mission board recommendation: ${result.recommendation}`],
-  };
-}
-
-function resultToRecord(mint: string, symbol: string | undefined, result: MissionResult, at: number): AttentionRecord {
-  const evidence: AttentionEvidence = { mint, symbol, query: symbol ?? mint, posts: [], platforms: [], links: [], fetchedAt: at };
-  return { mint, scores: resultToScores(result), evidence, at, source: result.provider ?? "manus" };
-}
-
-function num(x: unknown, fallback: number): number {
-  return typeof x === "number" && Number.isFinite(x) ? x : fallback;
 }

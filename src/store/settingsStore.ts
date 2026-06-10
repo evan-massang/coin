@@ -64,8 +64,12 @@ export const SettingsSchema = z.object({
   organicFloor: z.number().min(0).max(100).default(40),
 
   // ── Verdict thresholds (tunable by learning, within rails) ──
-  minConvictionBuySmall: z.number().min(0).max(100).default(55),
-  minConvictionBuyStrong: z.number().min(0).max(100).default(72),
+  // HARD FLOOR (V5.1 red-team fix): the conviction gate can be RAISED but never
+  // lowered below its calibrated values — replay proved gate 40 ⇒ −136 SOL. This
+  // is now enforced server-side by the schema (PUT /settings 400s below floor),
+  // not just by convention.
+  minConvictionBuySmall: z.number().min(55).max(100).default(55),
+  minConvictionBuyStrong: z.number().min(72).max(100).default(72),
 
   // ── Observation coverage (Cycle 3 — recycle watch slots toward active tokens) ──
   /** Demand-driven watch-slot recycling: evict dead slots to watch fresh survivors. */
@@ -147,18 +151,21 @@ export const SettingsSchema = z.object({
   minWeatherSamples: z.number().int().min(10).max(200).default(20),
 
   // ── Conviction weights (tunable by learning, within rails) ──
-  weightOrganic: z.number().min(0).default(15),
-  weightMomentum: z.number().min(0).default(30),
-  weightGraduation: z.number().min(0).default(12),
-  weightDevReputation: z.number().min(0).default(12),
-  weightSmartMoney: z.number().min(0).default(18),
-  weightSocial: z.number().min(0).default(8),
+  // CEILINGS (V5.1 red-team fix): no single facet may be weighted to dominate the
+  // blend, and the advisory anchors (social/hype) keep structurally small caps so
+  // "AI narrative can never force a BUY" stays true under any settings input.
+  weightOrganic: z.number().min(0).max(60).default(15),
+  weightMomentum: z.number().min(0).max(60).default(30),
+  weightGraduation: z.number().min(0).max(60).default(12),
+  weightDevReputation: z.number().min(0).max(60).default(12),
+  weightSmartMoney: z.number().min(0).max(60).default(18),
+  weightSocial: z.number().min(0).max(20).default(8),
   /** AI narrative weight — kept small; confirmation only. */
-  weightHype: z.number().min(0).default(5),
+  weightHype: z.number().min(0).max(15).default(5),
   /** Attention Intelligence (Project Athena) weight. Confidence-gated in the blend,
    *  so it only moves conviction for coins that were actually researched (newborns
    *  with no web footprint are unaffected). Tunable up toward a first-class signal. */
-  weightAttention: z.number().min(0).default(18),
+  weightAttention: z.number().min(0).max(45).default(18),
 
   // ── Optional API keys (free tiers; all optional) ──
   heliusApiKey: z.string().default(""),
@@ -166,6 +173,19 @@ export const SettingsSchema = z.object({
   anthropicApiKey: z.string().default(""),
   rugcheckApiKey: z.string().default(""),
   lunarcrushApiKey: z.string().default(""),
+
+  // ── Manus (Project Hermes — automated deep research; advisory only) ──
+  /** Manus API key (open.manus.im). Empty = mission board stays operator-manual. */
+  manusApiKey: z.string().default(""),
+  manusBaseUrl: z.string().default("https://api.manus.ai"),
+  manusAgentProfile: z.enum(["manus-1.6", "manus-1.6-lite", "manus-1.6-max"]).default("manus-1.6"),
+  /** Auto-send a Manus mission when a paper BUY opens (deep-research the coins we
+   *  actually hold). Off by default — each mission costs Manus credits. */
+  manusAutoMissions: z.boolean().default(false),
+  /** Hourly cap on AUTO missions (operator-clicked sends are not capped). */
+  manusMaxPerHour: z.number().int().min(1).max(60).default(6),
+  manusPollSec: z.number().int().min(5).max(300).default(20),
+  manusTimeoutMin: z.number().int().min(5).max(180).default(45),
 
   // ── AI Council (multi-model; advisory only — never overrides safety/risk) ──
   /** Master switch for the OpenCode-routed council seats (GPT-4o/DeepSeek/Qwen…). */
@@ -215,6 +235,7 @@ export const SECRET_KEYS: readonly SettingsKey[] = [
   "anthropicApiKey",
   "rugcheckApiKey",
   "lunarcrushApiKey",
+  "manusApiKey",
 ];
 
 export function defaultSettings(): Settings {
@@ -241,8 +262,19 @@ export class SettingsStore {
         /* ignore malformed row; default fills in */
       }
     }
-    // Unknown/missing keys fall back to schema defaults; bad values are dropped.
-    const parsed = SettingsSchema.safeParse(raw);
+    // PER-KEY salvage (V5.1 red-team fix): validate each stored key individually
+    // and drop ONLY the invalid ones. Previously one bad row (e.g. Infinity
+    // serialized as "null") failed the whole-object parse and silently reset
+    // EVERY setting to defaults on the next boot.
+    const shape = SettingsSchema.shape as Record<string, z.ZodTypeAny>;
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const s = shape[k];
+      if (!s) continue; // unknown key — dropped
+      const r = s.safeParse(v);
+      if (r.success) cleaned[k] = r.data;
+    }
+    const parsed = SettingsSchema.safeParse(cleaned);
     this.cache = parsed.success ? parsed.data : defaultSettings();
     return this.cache;
   }
@@ -262,6 +294,11 @@ export class SettingsStore {
     note?: string,
   ): SettingChange[] {
     const current = this.all();
+    // Non-finite numbers (Infinity via JSON "1e999") serialize as "null" and used
+    // to corrupt the store — reject them outright (V5.1 red-team fix).
+    for (const [k, v] of Object.entries(partial)) {
+      if (typeof v === "number" && !Number.isFinite(v)) throw new Error(`setting ${k} must be a finite number`);
+    }
     // Validate the merged object so we never persist an out-of-range value.
     const merged = SettingsSchema.parse({ ...current, ...partial });
     const now = Date.now();

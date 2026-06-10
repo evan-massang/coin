@@ -7,6 +7,7 @@ import { AttentionService, makeScorer } from "./attention/attentionService.js";
 import { collectEvidence } from "./attention/researchAgent.js";
 import { ProviderRegistry } from "./research/providerRegistry.js";
 import { AthenaProvider } from "./research/athenaProvider.js";
+import { ManusMissionRunner } from "./research/manusMissionRunner.js";
 import { EntryPipeline } from "./engine/entry.js";
 import { WalletObserver } from "./wallet/walletObserver.js";
 import { ExitEngine } from "./engine/exitEngine.js";
@@ -69,16 +70,31 @@ async function main(): Promise<void> {
       provider: research,
       warm: svc.attentionRepo.recent(200), // survive restarts via the durable store
       onComplete: (rec) => {
-        svc.attentionRepo.upsert(rec); // persist (meme graveyard + durable cache)
-        entry?.rescoreWithAttention(rec.mint, rec.scores);
+        svc.attentionRepo.upsert(rec); // persist (meme graveyard + history log)
+        void entry?.rescoreWithAttention(rec.mint, rec.scores, rec.source);
         log.info(`attention[${rec.source}] $${rec.evidence.symbol ?? rec.mint.slice(0, 6)} — ${rec.scores.narrative}`);
       },
     });
     svc.attention = attention;
 
+    // Project Hermes — automated Manus pipeline. Dormant until a Manus API key is
+    // set in CONFIG; then "Send to Manus" dispatches via the API and (optionally)
+    // every paper BUY auto-fires a deep-research mission. Results return through
+    // the SAME advisory injectResult → rescore → decide() path as a manual paste.
+    const manus = new ManusMissionRunner(svc);
+    svc.manus = manus;
+    manus.start();
+
     const pump = new PumpPortalClient({ newTokens: true });
     entry = new EntryPipeline(svc, pump, {
-      hooks: { onDecision: (decision) => void paper.onDecision(decision) },
+      hooks: {
+        onDecision: (decision) => {
+          void paper.onDecision(decision);
+          if (decision.verdict === "BUY_SMALL" || decision.verdict === "BUY_STRONG") {
+            void manus.autoMissionForBuy(decision.mint, decision.symbol);
+          }
+        },
+      },
     });
     entry.start();
 
@@ -176,6 +192,7 @@ async function main(): Promise<void> {
       paperExits?.stop();
       outcomes?.stop();
       learning?.stop();
+      svc.manus?.stop();
       if (auditTimer) clearInterval(auditTimer);
       svc.aiComputer.stopAutoDebate();
       svc.aiComputer.shutdownOpencode();
