@@ -121,14 +121,20 @@ export class ManusMissionRunner {
 
   /** Seed the hunt with the engine's OWN live shortlist — the data edge cloud
    *  agents lack (discovery #8 proved public APIs can't see hours-old micro-caps).
-   *  BUYs first, then Golden-Filter graduates, then strong WATCHes; last 45 min. */
+   *  GRADUATED COINS ONLY (Golden-Filter scanner hits or coins with a real DEX
+   *  pair). Hunt #10 proved pump.fun bonding-curve newborns STRUCTURALLY fail the
+   *  operator's playbook — the curve holds the mint authority and ~100% of supply,
+   *  so RugCheck can never pass them; seeding them just wastes Manus's pass. */
   private discoverySeeds(now: number): DiscoverySeed[] {
     const recent = this.svc.signals.recent(200).filter(
-      (s) => now - s.at <= 45 * 60_000 && (s.verdict === "BUY_SMALL" || s.verdict === "BUY_STRONG" || s.verdict === "WATCH_ONLY"),
+      (s) =>
+        now - s.at <= 45 * 60_000 &&
+        (s.verdict === "BUY_SMALL" || s.verdict === "BUY_STRONG" || s.verdict === "WATCH_ONLY") &&
+        // Graduated universe only: golden-filter scanner hit, or a real DEX pair exists.
+        (s.flags.includes("src:scan") || s.pairCreatedAt != null),
     );
     const seen = new Set<string>();
-    const rank = (s: (typeof recent)[number]): number =>
-      s.verdict !== "WATCH_ONLY" ? 0 : s.flags.includes("src:scan") ? 1 : 2;
+    const rank = (s: (typeof recent)[number]): number => (s.verdict !== "WATCH_ONLY" ? 0 : s.flags.includes("src:scan") ? 1 : 2);
     return recent
       .sort((a, b) => rank(a) - rank(b) || b.conviction - a.conviction)
       .filter((s) => (seen.has(s.mint) ? false : (seen.add(s.mint), true)))
@@ -136,7 +142,7 @@ export class ManusMissionRunner {
       .map((s) => ({
         mint: s.mint,
         symbol: s.symbol,
-        note: `local engine: ${s.verdict} conviction ${s.conviction}${s.flags.includes("src:scan") ? " · GRADUATED (golden-filter scanner)" : " · pump.fun newborn"}`,
+        note: `graduated — real Raydium pool, RugCheck resolves; local engine: ${s.verdict} conviction ${s.conviction}${s.flags.includes("src:scan") ? " (golden-filter scanner)" : ""}`,
       }));
   }
 

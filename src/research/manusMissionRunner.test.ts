@@ -50,6 +50,9 @@ describe("ManusMissionRunner", () => {
       signals: {
         recent: () => [
           { mint: "SeedMint11111111111111111111111111111111111", symbol: "SEED", verdict: "WATCH_ONLY", conviction: 52, flags: ["src:scan"], at: now - 60_000 },
+          // pump.fun newborn (no DEX pair, no src:scan) — must be EXCLUDED from seeds:
+          // bonding-curve coins structurally fail the playbook (curve holds authority+supply).
+          { mint: "NewbornMint111111111111111111111111111111111", symbol: "BORN", verdict: "BUY_SMALL", conviction: 60, flags: [], at: now - 60_000 },
         ],
       },
     } as unknown as Services;
@@ -170,7 +173,9 @@ describe("ManusMissionRunner", () => {
     const body = JSON.parse((f as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
     expect(body.message.content).toContain("SeedMint11111111111111111111111111111111111");
     expect(body.message.content).toMatch(/our local scanner watches pump\.fun/);
-    expect(body.message.content).toMatch(/GRADUATED \(golden-filter scanner\)/);
+    expect(body.message.content).toMatch(/graduated — real Raydium pool/);
+    // Bonding-curve newborns are NEVER seeded (they structurally fail the playbook).
+    expect(body.message.content).not.toContain("NewbornMint111111111111111111111111111111111");
   });
 
   it("DISCOVERY scheduling: auto-dispatches on interval, never doubles up while one is in flight", async () => {
