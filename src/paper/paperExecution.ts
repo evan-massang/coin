@@ -68,8 +68,11 @@ export class PaperTrader {
     if (!s.paperEnabled) return;
     if (decision.verdict !== "BUY_SMALL" && decision.verdict !== "BUY_STRONG") return;
     // Maturing-survivor scanner ships in SHADOW: its signals are journaled (and
-    // forward-tracked) for A/B vs the newborn feed, but not paper-bought yet.
-    if (s.scanShadowOnly && decision.flags?.includes("src:scan")) return;
+    // forward-tracked) for A/B vs the newborn feed, but not paper-bought —
+    // UNLESS Manus deep research validated the coin (research:manus). A graduate
+    // that passed the local gates AND independent Manus research is the exact
+    // class Project Hermes exists to trade; unvalidated scan coins stay shadow.
+    if (s.scanShadowOnly && decision.flags?.includes("src:scan") && !decision.flags?.includes("research:manus")) return;
 
     this.ensureWallet();
     const balanceSol = this.wallet.balance();

@@ -1,0 +1,10 @@
+import Database from "better-sqlite3";
+const db = new Database("data/sniper.sqlite", { readonly: true });
+const mint = "9ZtbETDNjnST9Y2zs82FZYy49xUMPgqXRh46YjjRpump";
+const pos = db.prepare("SELECT id,status,sol_invested,entry_price_usd,token_amount,entry_at_ms FROM paper_positions WHERE mint=?").all(mint);
+console.log("positions:", JSON.stringify(pos));
+const fills = db.prepare("SELECT side,sol_amount,price_usd,reason,at FROM paper_trades WHERE mint=? ORDER BY at ASC").all(mint);
+console.log("fills:", JSON.stringify(fills));
+const sigs = db.prepare("SELECT verdict,conviction,flags,price_at_alert FROM signals WHERE mint=? ORDER BY at ASC").all(mint);
+for (const s of sigs) console.log("signal:", s.verdict, s.conviction, s.flags, "priced:", s.price_at_alert);
+db.close();

@@ -104,6 +104,22 @@ describe("PaperTrader.executeSell — token conservation under re-fired exits", 
     expect(realized).toBeCloseTo(proceeds - 0.5, 6);
   });
 
+  it("scan-shadow: scanner coins stay journal-only UNLESS Manus validated them", async () => {
+    const decision = (flags: string[]) => ({
+      mint: "M2", symbol: "BREAD", verdict: "BUY_SMALL" as const, conviction: 69,
+      scores: { safety: 80, organic: 70, momentum: 60, graduation: 50, devReputation: 50, smartMoney: 50, social: 40, hype: 30, lateEntryRisk: 10, attention: 92 },
+      reasons: [], flags, caps: [], suggestedRiskPct: 1, maxPositionSol: 1, at: Date.now(),
+    });
+    // Plain scan coin (shadow A/B) → NO paper buy.
+    await trader.onDecision(decision(["src:scan"]));
+    expect(positions.openByMint("M2")).toBeUndefined();
+    // Same coin validated by Manus deep research → the buy executes.
+    await trader.onDecision(decision(["src:scan", "research:manus"]));
+    const pos = positions.openByMint("M2");
+    expect(pos).toBeDefined();
+    expect(pos!.solInvested).toBeGreaterThan(0);
+  });
+
   it("a sell against an already-CLOSED position never credits the wallet", async () => {
     const stale = stalePos();
     await trader.executeSell(stale, exitSignal(1)); // closes it
