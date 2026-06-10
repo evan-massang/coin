@@ -424,6 +424,15 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_attn_hist_mint ON attention_research_history(mint, at);
     `,
   },
+  {
+    version: 14,
+    up: /* sql */ `
+      -- Hermes Phase 3: mission kinds. 'research' = per-coin review (default);
+      -- 'discovery' = Manus hunts candidates itself (mint='discovery' sentinel);
+      -- 'deepdive' = batched hard-opinion review of multiple held/watched coins.
+      ALTER TABLE missions ADD COLUMN kind TEXT NOT NULL DEFAULT 'research';
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

@@ -626,6 +626,9 @@ const CFG = [
   { k: "manusAgentProfile", label: "Manus agent profile", t: "select", opts: ["manus-1.6", "manus-1.6-lite", "manus-1.6-max"] },
   { k: "manusAutoMissions", label: "auto-send Manus mission on every paper BUY (costs credits)", t: "checkbox" },
   { k: "manusMaxPerHour", label: "Manus auto-missions max/hour", t: "number" },
+  { k: "manusDiscoveryEnabled", label: "recurring Manus DISCOVERY hunts (auto, costs credits)", t: "checkbox" },
+  { k: "manusDiscoveryIntervalMin", label: "discovery interval (minutes)", t: "number" },
+  { k: "manusDiscoveryCandidates", label: "candidates per discovery hunt", t: "number" },
   { k: "councilAutoDebate", label: "always-on council debate (auto, every coin)", t: "checkbox" },
   { k: "opencodeEnabled", label: "opencode council (GPT/DeepSeek/Qwen)", t: "checkbox" },
   { k: "opencodeAutoServe", label: "auto-start opencode server", t: "checkbox" },
@@ -716,7 +719,8 @@ async function renderMissions() {
         const stCol = m.status === "resolved" ? "green" : m.status === "failed" ? "red" : "gold";
         const live = m.externalUrl && (m.status === "sent" || m.status === "resolved") ? ` · <a class="cfg gold" href="${esc(m.externalUrl)}" target="_blank" rel="noopener">🛰 live</a>` : "";
         const err = m.status === "failed" && m.error ? ` · <span class="red small">${esc(m.error.slice(0, 80))}</span>` : "";
-        return `<div class="rz-item" data-mint="${esc(m.mint)}" style="cursor:pointer"><b>$${esc(m.symbol || m.mint.slice(0, 6))}</b> <span class="muted">#${m.id}</span> · ${esc(v)} · <span class="${stCol}">${esc(m.status)}</span>${res}${live}${err}</div>`;
+        const kind = m.kind && m.kind !== "research" ? `<b class="gold">[${esc(m.kind)}]</b> ` : "";
+        return `<div class="rz-item" data-mint="${esc(m.mint)}" style="cursor:pointer">${kind}<b>$${esc(m.symbol || m.mint.slice(0, 6))}</b> <span class="muted">#${m.id}</span> · ${esc(v)} · <span class="${stCol}">${esc(m.status)}</span>${res}${live}${err}</div>`;
       }).join("")
     : `<div class="muted small">no missions yet — compose one above</div>`;
   $("#hm-list").querySelectorAll(".rz-item[data-mint]").forEach((el) => (el.onclick = () => { $("#hm-mint").value = el.getAttribute("data-mint"); loadCase(); }));
@@ -738,11 +742,29 @@ async function loadCase(mint) {
     <div class="muted small">thesis health: ${c.thesisHealth ? `<b style="color:${c.thesisHealth.status === "broken" ? COL.red : c.thesisHealth.status === "weakening" ? COL.gold : COL.green}">${c.thesisHealth.status}</b> · entry ${c.thesisHealth.entry} → now ${c.thesisHealth.current} (Δ${c.thesisHealth.delta >= 0 ? "+" : ""}${c.thesisHealth.delta})` : "—"}</div>
     <div class="muted small">outcome: ${o.resolved ? `peak ${Math.round(o.maxGainPct)}% · worst ${Math.round(o.maxDrawdownPct || 0)}%` : "unresolved"}</div>`;
 }
+async function fireDiscover() {
+  $("#hm-out2").textContent = "dispatching discovery…";
+  const r = await api("/manus/discover", { method: "POST", body: {} });
+  $("#hm-out2").innerHTML = r.ok
+    ? `<span class="green">discovery #${r.id} hunting</span>${r.taskUrl ? ` · <a class="cfg gold" href="${esc(r.taskUrl)}" target="_blank" rel="noopener">🛰 watch live</a>` : ""}`
+    : `<span class="red">${esc(r.error || "failed")}</span>`;
+  renderMissions();
+}
+async function fireDeepdive() {
+  $("#hm-out2").textContent = "dispatching deep-dive…";
+  const r = await api("/manus/deepdive", { method: "POST", body: {} });
+  $("#hm-out2").innerHTML = r.ok
+    ? `<span class="green">deep-dive #${r.id} reviewing ${r.coins} coins</span>${r.taskUrl ? ` · <a class="cfg gold" href="${esc(r.taskUrl)}" target="_blank" rel="noopener">🛰 watch live</a>` : ""}`
+    : `<span class="red">${esc(r.error || "failed")}</span>`;
+  renderMissions();
+}
 $("#open-hermes").onclick = () => openHermes();
 $("#close-hermes").onclick = () => $("#hermes").classList.remove("open");
 $("#hm-compose").onclick = composeMission;
 $("#hm-submit").onclick = submitResult;
 $("#hm-case").onclick = () => loadCase();
+$("#hm-discover").onclick = fireDiscover;
+$("#hm-deepdive").onclick = fireDeepdive;
 $("#send-manus").onclick = () => openHermes(STATE.selectedMint || "");
 
 (async function boot() {

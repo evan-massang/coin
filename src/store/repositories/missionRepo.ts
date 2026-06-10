@@ -8,6 +8,7 @@ import type { Mission } from "../../research/mission.types.js";
 // an execution path.
 
 export type MissionStatus = "open" | "sent" | "resolved" | "cancelled" | "failed";
+export type MissionKind = "research" | "discovery" | "deepdive";
 
 export interface MissionResult {
   recommendation: "confirm" | "caution" | "unsure" | "avoid";
@@ -28,8 +29,11 @@ export interface MissionRow {
   verdict?: string;
   conviction?: number;
   status: MissionStatus;
+  kind: MissionKind;
   mission: Mission;
   result?: MissionResult;
+  /** Raw structured payload for discovery/deepdive missions (candidates/results). */
+  resultRaw?: unknown;
   provider?: string;
   createdAt: number;
   resolvedAt?: number;
@@ -44,17 +48,18 @@ export interface MissionRow {
 export class MissionRepo {
   constructor(private readonly db: DB) {}
 
-  insert(m: Mission): number {
+  insert(m: Mission, kind: MissionKind = "research"): number {
     const info = this.db
       .prepare(
-        `INSERT INTO missions(mint, symbol, verdict, conviction, status, mission_json, created_at)
-         VALUES (@mint, @symbol, @verdict, @conviction, 'open', @missionJson, @createdAt)`,
+        `INSERT INTO missions(mint, symbol, verdict, conviction, status, kind, mission_json, created_at)
+         VALUES (@mint, @symbol, @verdict, @conviction, 'open', @kind, @missionJson, @createdAt)`,
       )
       .run({
         mint: m.mint,
         symbol: m.symbol ?? null,
         verdict: m.verdict,
         conviction: m.conviction,
+        kind,
         missionJson: JSON.stringify(m),
         createdAt: m.createdAt,
       });
@@ -125,6 +130,30 @@ export class MissionRepo {
     return (this.db.prepare("SELECT COUNT(*) AS n FROM missions WHERE sent_at IS NOT NULL AND sent_at >= ?").get(ts) as { n: number }).n;
   }
 
+  /** Store a raw structured payload (discovery/deepdive) — same status guard as setResult. */
+  setResultRaw(id: number, payload: unknown, provider: string, resolvedAt: number): boolean {
+    const info = this.db
+      .prepare(`UPDATE missions SET result_json=?, provider=?, status='resolved', resolved_at=? WHERE id=? AND status IN ('open','sent')`)
+      .run(JSON.stringify(payload), provider, resolvedAt, id);
+    return info.changes > 0;
+  }
+
+  /** Newest mission of a kind (discovery cadence check). */
+  latestByKind(kind: MissionKind): MissionRow | undefined {
+    const r = this.db
+      .prepare("SELECT * FROM missions WHERE kind=? ORDER BY created_at DESC LIMIT 1")
+      .get(kind) as Record<string, unknown> | undefined;
+    return r ? rowToMission(r) : undefined;
+  }
+
+  /** Any mission of this kind still open or awaiting a remote result? */
+  hasActiveOfKind(kind: MissionKind): boolean {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS n FROM missions WHERE kind=? AND status IN ('open','sent')")
+      .get(kind) as { n: number };
+    return r.n > 0;
+  }
+
   cancel(id: number): void {
     this.db.prepare(`UPDATE missions SET status='cancelled' WHERE id=? AND status='open'`).run(id);
   }
@@ -140,6 +169,8 @@ function parseJson<T>(v: unknown, fallback: T): T {
 }
 
 function rowToMission(r: Record<string, unknown>): MissionRow {
+  const kind = ((r.kind as string) || "research") as MissionKind;
+  const rawResult = r.result_json ? parseJson<unknown>(r.result_json, undefined) : undefined;
   return {
     id: r.id as number,
     mint: r.mint as string,
@@ -147,8 +178,10 @@ function rowToMission(r: Record<string, unknown>): MissionRow {
     verdict: (r.verdict as string) ?? undefined,
     conviction: (r.conviction as number) ?? undefined,
     status: r.status as MissionStatus,
+    kind,
     mission: parseJson(r.mission_json, {} as Mission),
-    result: r.result_json ? parseJson<MissionResult | undefined>(r.result_json, undefined) : undefined,
+    result: kind === "research" ? (rawResult as MissionResult | undefined) : undefined,
+    resultRaw: kind === "research" ? undefined : rawResult,
     provider: (r.provider as string) ?? undefined,
     createdAt: r.created_at as number,
     resolvedAt: (r.resolved_at as number) ?? undefined,

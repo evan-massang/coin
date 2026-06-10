@@ -50,6 +50,47 @@ export function manusRoutes(svc: Services): Router {
     res.type("text/plain").send(missionToPrompt(row.mission));
   });
 
+  // Hermes Phase 3 — fire a DISCOVERY mission: Manus hunts candidates with the
+  // operator playbook; resolution injects every valid mint into the live pipeline.
+  r.post("/manus/discover", async (_req, res) => {
+    if (!svc.manus?.available()) {
+      res.status(409).json({ ok: false, error: "no Manus API key configured (CONFIG → Manus API key)" });
+      return;
+    }
+    const out = await svc.manus.dispatchDiscovery("operator");
+    res.status(out.ok ? 200 : 409).json(out);
+  });
+
+  // Batched hard-opinion review. Body { mints?: string[] } — defaults to every
+  // open paper position (the coins we actually hold), capped at 10.
+  r.post("/manus/deepdive", async (req, res) => {
+    if (!svc.manus?.available()) {
+      res.status(409).json({ ok: false, error: "no Manus API key configured (CONFIG → Manus API key)" });
+      return;
+    }
+    let coins: Array<{ mint: string; symbol?: string; note?: string }>;
+    const bodyMints = Array.isArray(req.body?.mints) ? (req.body.mints as unknown[]).map(String) : undefined;
+    if (bodyMints?.length) {
+      const valid = bodyMints.filter((m) => isValidSolanaAddress(m)).slice(0, 10);
+      if (!valid.length) {
+        res.status(400).json({ ok: false, error: "no valid mints in body.mints" });
+        return;
+      }
+      coins = valid.map((mint) => ({ mint }));
+    } else {
+      coins = svc.paperPositions
+        .byStatus(true)
+        .slice(0, 10)
+        .map((p) => ({ mint: p.mint, symbol: p.symbol, note: `open paper position since ${new Date(p.entryAtMs).toISOString().slice(0, 16)}Z` }));
+      if (!coins.length) {
+        res.status(404).json({ ok: false, error: "no open paper positions to review — pass body.mints" });
+        return;
+      }
+    }
+    const out = await svc.manus.dispatchDeepdive(coins, "operator");
+    res.status(out.ok ? 200 : 409).json({ ...out, coins: coins.length });
+  });
+
   // Manually dispatch an existing OPEN mission to the Manus API.
   r.post("/manus/mission/:id/send", async (req, res) => {
     if (!svc.manus?.available()) {

@@ -30,6 +30,7 @@ describe("ManusMissionRunner", () => {
   let db: DB;
   let missions: MissionRepo;
   let injected: Array<{ mint: string; source: string; attention: number }>;
+  let injectedTokens: Array<{ mint: string; symbol?: string; discoverySource?: string }>;
   let svc: Services;
   let now: number;
 
@@ -37,6 +38,7 @@ describe("ManusMissionRunner", () => {
     db = openDb(":memory:");
     missions = new MissionRepo(db);
     injected = [];
+    injectedTokens = [];
     now = 1_000_000;
     const settings = new SettingsStore(db);
     settings.update({ manusApiKey: "TESTKEY" });
@@ -44,6 +46,7 @@ describe("ManusMissionRunner", () => {
       settings,
       missions,
       attention: { injectResult: (rec: { mint: string; source: string; scores: { attention: number } }) => injected.push({ mint: rec.mint, source: rec.source, attention: rec.scores.attention }) },
+      runtime: { injectToken: (t: { mint: string; symbol?: string; discoverySource?: string }) => injectedTokens.push(t) },
     } as unknown as Services;
   });
   afterEach(() => db.close());
@@ -121,6 +124,75 @@ describe("ManusMissionRunner", () => {
     await r.pollOnce();
     expect(missions.get(id)!.status).toBe("failed");
     expect(missions.get(id)!.error).toMatch(/timed out/);
+  });
+
+  it("DISCOVERY: candidates are injected into the pipeline with research attached; invalid addresses skipped", async () => {
+    const validA = "Cc7vCWVQ7AqHxuJYYQFr2Wj1GS66WQfPZcknvBTpump";
+    const validB = "8JBkyLF1HXCNPgy9yyhRFcXCjYkbTxBCif25CSKfpump";
+    const f = fetchScript([
+      { status: 200, body: { ok: true, task_id: "TD", task_url: "u" } },
+      { status: 200, body: { events: [
+        { type: "structured_output_result", success: true, value: { candidates: [
+          { contractAddress: validA, ticker: "$WIF2", narrative: "dog in a hat again", whyItMoons: "mid-tier callers picking it up", bearCase: "copycat", humanityScore: 80, viralityScore: 70, outsideCryptoScore: 40, culturalStrengthScore: 60, attentionScore: 72, confidence: 70 },
+          { contractAddress: validB, ticker: "CAT", narrative: "cat meme", whyItMoons: "tiktok sound trending", bearCase: "thin", humanityScore: 60, viralityScore: 80, outsideCryptoScore: 55, culturalStrengthScore: 50, attentionScore: 65, confidence: 60 },
+          { contractAddress: "not-a-real-address", ticker: "SCAM", narrative: "x", whyItMoons: "y", bearCase: "z", humanityScore: 1, viralityScore: 1, outsideCryptoScore: 1, culturalStrengthScore: 1, attentionScore: 1, confidence: 1 },
+        ], rejectedCount: 34, marketNote: "choppy" } },
+        { type: "status_update", agent_status: "stopped" },
+      ] } },
+    ]);
+    const r = runner(f);
+    const d = await r.dispatchDiscovery("operator");
+    expect(d.ok).toBe(true);
+    await r.pollOnce();
+    const row = missions.get(d.id!)!;
+    expect(row.status).toBe("resolved");
+    expect(row.kind).toBe("discovery");
+    expect((row.resultRaw as { rejectedCount: number }).rejectedCount).toBe(34); // full audit trail kept
+    // 2 valid candidates injected into the pipeline, the garbage address skipped.
+    expect(injectedTokens.map((t) => t.mint)).toEqual([validA, validB]);
+    expect(injectedTokens[0].discoverySource).toBe("manus");
+    expect(injectedTokens[0].symbol).toBe("WIF2"); // $ stripped
+    // Research pre-attached so the readiness gate sees them as researched.
+    expect(injected.map((i) => i.mint)).toEqual([validA, validB]);
+    expect(injected[0].source).toBe("manus");
+    expect(injected[0].attention).toBe(72);
+  });
+
+  it("DISCOVERY scheduling: auto-dispatches on interval, never doubles up while one is in flight", async () => {
+    (svc.settings as SettingsStore).update({ manusDiscoveryEnabled: true, manusDiscoveryIntervalMin: 60 });
+    const f = fetchScript([
+      { status: 200, body: { ok: true, task_id: "TD1" } }, // dispatch
+      { status: 200, body: { events: [{ type: "status_update", agent_status: "running" }] } }, // poll: still running
+      { status: 200, body: { events: [{ type: "status_update", agent_status: "running" }] } },
+    ]);
+    const r = runner(f);
+    await r.pollOnce(); // dispatches discovery #1
+    expect(missions.recent(10).filter((m) => m.kind === "discovery")).toHaveLength(1);
+    await r.pollOnce(); // one in flight → no new dispatch
+    expect(missions.recent(10).filter((m) => m.kind === "discovery")).toHaveLength(1);
+  });
+
+  it("DEEPDIVE: batched per-coin verdicts are applied through the advisory path", async () => {
+    const a = "Cc7vCWVQ7AqHxuJYYQFr2Wj1GS66WQfPZcknvBTpump";
+    const b = "8JBkyLF1HXCNPgy9yyhRFcXCjYkbTxBCif25CSKfpump";
+    const f = fetchScript([
+      { status: 200, body: { ok: true, task_id: "TX" } },
+      { status: 200, body: { events: [
+        { type: "structured_output_result", success: true, value: { results: [
+          { contractAddress: a, recommendation: "confirm", confidence: 80, humanityScore: 70, viralityScore: 70, outsideCryptoScore: 50, culturalStrengthScore: 60, attentionScore: 68, narrative: "still spreading", keyFinding: "TG active", bearCase: "crowding" },
+          { contractAddress: b, recommendation: "avoid", confidence: 90, humanityScore: 10, viralityScore: 5, outsideCryptoScore: 5, culturalStrengthScore: 10, attentionScore: 8, narrative: "attention dead", keyFinding: "dev selling", bearCase: "rug pattern" },
+        ] } },
+        { type: "status_update", agent_status: "stopped" },
+      ] } },
+    ]);
+    const r = runner(f);
+    const d = await r.dispatchDeepdive([{ mint: a, symbol: "AAA" }, { mint: b, symbol: "BBB" }], "operator");
+    expect(d.ok).toBe(true);
+    await r.pollOnce();
+    expect(missions.get(d.id!)!.status).toBe("resolved");
+    expect(injected).toHaveLength(2);
+    expect(injected[0]).toMatchObject({ mint: a, source: "manus", attention: 68 });
+    expect(injected[1]).toMatchObject({ mint: b, source: "manus", attention: 8 }); // avoid verdict lands too
   });
 
   it("auto-missions respect the hourly cap; operator sends do not", async () => {

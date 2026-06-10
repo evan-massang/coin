@@ -22,7 +22,7 @@ import { AlertDispatcher } from "./alerts/dispatcher.js";
 import { DesktopNotifier } from "./alerts/desktopNotifier.js";
 import { ChimePlayer } from "./alerts/sound.js";
 import { config } from "./config.js";
-import type { WalletStatus, GraphIntel } from "./types.js";
+import type { WalletStatus, GraphIntel, NewToken } from "./types.js";
 
 export interface EngineState {
   observing: number;
@@ -42,6 +42,9 @@ export interface RuntimeState {
   /** Is this mint still tracked by the entry pipeline? (set by EntryPipeline.start;
    *  lets the mission board report honestly whether a result can still re-score.) */
   isTracked?: (mint: string) => boolean;
+  /** Inject a discovered token into the live pipeline (set by EntryPipeline.start;
+   *  used by Manus discovery missions — Stage-0 verifies the candidate's claims). */
+  injectToken?: (t: NewToken) => void;
 }
 
 /**

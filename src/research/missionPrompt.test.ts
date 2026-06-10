@@ -32,6 +32,9 @@ function check(node: unknown, depth: number, path: string, problems: string[]): 
     if (Array.isArray(o.required)) {
       for (const r of o.required as string[]) if (!(r in props)) problems.push(`${path}: required "${r}" not in properties`);
     }
+    // Live-validator rule (probed, undocumented): EVERY property must be required.
+    const req = new Set((o.required as string[]) ?? []);
+    for (const k of Object.keys(props)) if (!req.has(k)) problems.push(`${path}: property "${k}" not in required (live Manus validator 400s on partial required)`);
     for (const [k, v] of Object.entries(props)) check(v, depth + 1, `${path}.${k}`, problems);
   }
   if (o.type === "array") check(o.items, depth + 1, `${path}[]`, problems);

@@ -40,8 +40,9 @@ export interface NewToken {
   pool?: string;
   seenAt: number;
   /** Which discovery source surfaced this token. "pump" = pump.fun newborn feed
-   *  (default); "scan" = DexScreener maturing-survivor Golden-Filter scanner. */
-  discoverySource?: "pump" | "scan";
+   *  (default); "scan" = DexScreener maturing-survivor Golden-Filter scanner;
+   *  "manus" = a Manus discovery mission candidate (Hermes Phase 3). */
+  discoverySource?: "pump" | "scan" | "manus";
 }
 
 /** A single on-chain trade event (token trade stream or wallet trade stream). */

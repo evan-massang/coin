@@ -1,9 +1,12 @@
 import type { Services } from "../services.js";
-import type { MissionResult } from "../store/repositories/missionRepo.js";
+import type { Mission } from "./mission.types.js";
+import type { MissionResult, MissionRow } from "../store/repositories/missionRepo.js";
 import { ManusClient, latestAgentStatus, extractStructuredResult, extractErrorMessage } from "./manusClient.js";
 import { composeMissionForMint } from "./composeMission.js";
 import { missionToPrompt, MANUS_RECOMMENDATION_SCHEMA } from "./missionPrompt.js";
+import { discoveryPrompt, deepdivePrompt, DISCOVERY_SCHEMA, DEEPDIVE_SCHEMA } from "./discoveryPrompt.js";
 import { resultToRecord } from "./missionResult.js";
+import { isValidSolanaAddress } from "../sources/solanaRpc.js";
 import { metrics } from "../util/metrics.js";
 import { log } from "../util/logger.js";
 
@@ -86,6 +89,59 @@ export class ManusMissionRunner {
     }
   }
 
+  /** Hermes Phase 3 — dispatch a DISCOVERY mission: Manus hunts candidates itself
+   *  with the operator's playbook; resolution injects every valid mint into the
+   *  local pipeline for verification + monitoring. */
+  async dispatchDiscovery(trigger: "operator" | "auto"): Promise<{ ok: boolean; id?: number; taskUrl?: string; error?: string }> {
+    if (!this.available()) return { ok: false, error: "no Manus API key configured" };
+    if (this.svc.missions.hasActiveOfKind("discovery")) return { ok: false, error: "a discovery mission is already in flight" };
+    const n = this.svc.settings.get("manusDiscoveryCandidates");
+    const now = this.now();
+    const prompt = discoveryPrompt(n);
+    const id = this.svc.missions.insert(pseudoMission("discovery", "SCAN", `Discovery: hunt the top ${n} Solana meme candidates ($50k-500k mcap, hard rug filter, real humans, pre-influencer).`, now), "discovery");
+    try {
+      const created = await this.client().createTask({
+        prompt,
+        title: `Coin AI discovery #${id} — hunt ${n} candidates`,
+        agentProfile: this.svc.settings.get("manusAgentProfile"),
+        schema: DISCOVERY_SCHEMA,
+      });
+      this.svc.missions.setSent(id, created.taskId, created.taskUrl, now);
+      metrics.inc("manus_discovery_created");
+      log.ok(`manus: discovery #${id} dispatched (${trigger}) → ${created.taskUrl ?? created.taskId}`);
+      return { ok: true, id, taskUrl: created.taskUrl };
+    } catch (e) {
+      this.svc.missions.markFailed(id, (e as Error).message, this.now());
+      return { ok: false, id, error: (e as Error).message };
+    }
+  }
+
+  /** Batched hard-opinion review: MANY coins in ONE mission (never one-at-a-time). */
+  async dispatchDeepdive(coins: Array<{ mint: string; symbol?: string; note?: string }>, trigger: "operator" | "auto"): Promise<{ ok: boolean; id?: number; taskUrl?: string; error?: string }> {
+    if (!this.available()) return { ok: false, error: "no Manus API key configured" };
+    if (!coins.length) return { ok: false, error: "no coins to review" };
+    const now = this.now();
+    const id = this.svc.missions.insert(
+      pseudoMission("deepdive", `${coins.length} COINS`, `Deep-dive: batched hard opinion on ${coins.map((c) => `$${c.symbol ?? c.mint.slice(0, 6)}`).join(", ")}`, now),
+      "deepdive",
+    );
+    try {
+      const created = await this.client().createTask({
+        prompt: deepdivePrompt(coins),
+        title: `Coin AI deep-dive #${id} — ${coins.length} coins`,
+        agentProfile: this.svc.settings.get("manusAgentProfile"),
+        schema: DEEPDIVE_SCHEMA,
+      });
+      this.svc.missions.setSent(id, created.taskId, created.taskUrl, now);
+      metrics.inc("manus_deepdive_created");
+      log.ok(`manus: deep-dive #${id} (${coins.length} coins) dispatched (${trigger})`);
+      return { ok: true, id, taskUrl: created.taskUrl };
+    } catch (e) {
+      this.svc.missions.markFailed(id, (e as Error).message, this.now());
+      return { ok: false, id, error: (e as Error).message };
+    }
+  }
+
   /** Auto-mission on a fresh paper BUY (off by default; hourly-capped; deduped per mint). */
   async autoMissionForBuy(mint: string, symbol?: string): Promise<void> {
     if (!this.available() || !this.svc.settings.get("manusAutoMissions")) return;
@@ -98,11 +154,21 @@ export class ManusMissionRunner {
     if (!r.ok) log.info(`manus: auto-mission for $${symbol ?? mint.slice(0, 6)} not sent: ${r.error}`);
   }
 
-  /** Poll every SENT mission; apply finished results through the advisory path. */
+  /** Poll every SENT mission; apply finished results through the advisory path.
+   *  Also runs the recurring DISCOVERY cadence (Hermes Phase 3). */
   async pollOnce(): Promise<void> {
     if (this.polling || !this.available()) return; // never overlap ticks
     this.polling = true;
     try {
+      // Recurring discovery: one mission in flight at a time, re-dispatched once
+      // the interval has elapsed since the last one was CREATED.
+      if (this.svc.settings.get("manusDiscoveryEnabled") && !this.svc.missions.hasActiveOfKind("discovery")) {
+        const last = this.svc.missions.latestByKind("discovery");
+        const intervalMs = this.svc.settings.get("manusDiscoveryIntervalMin") * 60_000;
+        if (!last || this.now() - last.createdAt >= intervalMs) {
+          await this.dispatchDiscovery("auto");
+        }
+      }
       const sent = this.svc.missions.sentMissions();
       if (!sent.length) return;
       const client = this.client();
@@ -115,7 +181,9 @@ export class ManusMissionRunner {
           if (status === "stopped") {
             const sr = extractStructuredResult(events);
             if (sr?.success && sr.value && typeof sr.value === "object") {
-              this.applyResult(m.id, m.mint, m.symbol, sr.value as Record<string, unknown>);
+              if (m.kind === "discovery") this.applyDiscovery(m, sr.value as Record<string, unknown>);
+              else if (m.kind === "deepdive") this.applyDeepdive(m, sr.value as Record<string, unknown>);
+              else this.applyResult(m.id, m.mint, m.symbol, sr.value as Record<string, unknown>);
             } else {
               this.svc.missions.markFailed(m.id, `task stopped without structured output${sr?.error ? `: ${sr.error}` : ""} (events: ${JSON.stringify(events).slice(0, 300)})`, this.now());
               metrics.inc("manus_task_failed");
@@ -160,4 +228,103 @@ export class ManusMissionRunner {
     metrics.inc("manus_task_resolved");
     log.ok(`manus: mission #${missionId} $${symbol ?? mint.slice(0, 6)} resolved → ${recommendation} (conf ${Math.round(result.confidence)})`);
   }
+
+  /** Discovery resolution: inject every valid candidate into the LOCAL pipeline.
+   *  Manus proposes; the engine verifies (Stage-0 RugCheck/holders) and monitors.
+   *  The candidate's research arrives pre-attached (injectResult, source=manus),
+   *  so the readiness gate sees it as researched — local fundamentals still decide. */
+  private applyDiscovery(m: MissionRow, value: Record<string, unknown>): void {
+    const now = this.now();
+    this.svc.missions.setResultRaw(m.id, value, "manus", now);
+    const candidates = Array.isArray(value.candidates) ? (value.candidates as Array<Record<string, unknown>>) : [];
+    let injected = 0, invalid = 0;
+    for (const c of candidates.slice(0, 12)) {
+      const mint = typeof c.contractAddress === "string" ? c.contractAddress.trim() : "";
+      const ticker = typeof c.ticker === "string" ? c.ticker.replace(/^\$/, "") : undefined;
+      if (!isValidSolanaAddress(mint)) {
+        invalid++;
+        log.warn(`manus discovery #${m.id}: invalid contract address "${String(c.contractAddress).slice(0, 50)}" ($${ticker ?? "?"}) — skipped`);
+        continue;
+      }
+      // Attach the research FIRST so the attention facet + readiness gate see it
+      // the moment the coin is scored.
+      const result: MissionResult = {
+        recommendation: "confirm",
+        confidence: num(c.confidence, 60),
+        scores: flatScores(c),
+        narrative: typeof c.narrative === "string" ? c.narrative : undefined,
+        reasons: [
+          ...(typeof c.whyItMoons === "string" && c.whyItMoons ? [c.whyItMoons] : []),
+          ...(typeof c.humanityEvidence === "string" && c.humanityEvidence ? [c.humanityEvidence] : []),
+          ...(typeof c.rugcheckSummary === "string" && c.rugcheckSummary ? [`rugcheck: ${c.rugcheckSummary}`] : []),
+          ...(typeof c.bearCase === "string" && c.bearCase ? [`bear: ${c.bearCase}`] : []),
+        ].slice(0, 8),
+        provider: "manus",
+      };
+      this.svc.attention?.injectResult(resultToRecord(mint, ticker, result, now));
+      // Then hand the coin to the live pipeline (Stage-0 verifies Manus's claims).
+      this.svc.runtime.injectToken?.({
+        mint,
+        symbol: ticker,
+        name: typeof c.name === "string" ? c.name : undefined,
+        seenAt: now,
+        discoverySource: "manus",
+      });
+      injected++;
+      metrics.inc("manus_discovery_candidate");
+    }
+    metrics.inc("manus_discovery_resolved");
+    log.ok(`manus: discovery #${m.id} resolved — ${injected} candidate(s) injected into the pipeline${invalid ? `, ${invalid} invalid address(es) skipped` : ""} (reviewed/rejected: ${num(value.rejectedCount, 0)})`);
+  }
+
+  /** Deep-dive resolution: apply each per-coin verdict through the advisory path
+   *  (tracked coins re-score immediately; others cache for future evaluation). */
+  private applyDeepdive(m: MissionRow, value: Record<string, unknown>): void {
+    const now = this.now();
+    this.svc.missions.setResultRaw(m.id, value, "manus", now);
+    const results = Array.isArray(value.results) ? (value.results as Array<Record<string, unknown>>) : [];
+    let applied = 0;
+    for (const r of results) {
+      const mint = typeof r.contractAddress === "string" ? r.contractAddress.trim() : "";
+      if (!isValidSolanaAddress(mint)) continue;
+      const rec = String(r.recommendation ?? "");
+      const result: MissionResult = {
+        recommendation: (["confirm", "caution", "unsure", "avoid"].includes(rec) ? rec : "unsure") as MissionResult["recommendation"],
+        confidence: num(r.confidence, 50),
+        scores: flatScores(r),
+        narrative: typeof r.narrative === "string" ? r.narrative : undefined,
+        reasons: [
+          ...(typeof r.keyFinding === "string" && r.keyFinding ? [r.keyFinding] : []),
+          ...(typeof r.bearCase === "string" && r.bearCase ? [`bear: ${r.bearCase}`] : []),
+        ].slice(0, 6),
+        provider: "manus",
+      };
+      this.svc.attention?.injectResult(resultToRecord(mint, undefined, result, now));
+      applied++;
+    }
+    metrics.inc("manus_deepdive_resolved");
+    log.ok(`manus: deep-dive #${m.id} resolved — ${applied}/${results.length} verdicts applied`);
+  }
+}
+
+/** Minimal Mission wrapper for non-per-coin missions (discovery/deepdive). */
+function pseudoMission(mint: string, symbol: string, objective: string, now: number): Mission {
+  return { mint, symbol, objective, verdict: "-", conviction: 0, buckets: [], gaps: [], outputContract: "structured (see schema)", createdAt: now };
+}
+
+function num(x: unknown, fallback: number): number {
+  return typeof x === "number" && Number.isFinite(x) ? x : fallback;
+}
+
+/** Map the FLAT per-coin score fields (Manus schema constraint: no nested object
+ *  inside array items) onto the MissionResult scores shape. */
+function flatScores(o: Record<string, unknown>): MissionResult["scores"] | undefined {
+  if (typeof o.attentionScore !== "number") return undefined;
+  return {
+    humanity: typeof o.humanityScore === "number" ? o.humanityScore : undefined,
+    virality: typeof o.viralityScore === "number" ? o.viralityScore : undefined,
+    outsideCrypto: typeof o.outsideCryptoScore === "number" ? o.outsideCryptoScore : undefined,
+    culturalStrength: typeof o.culturalStrengthScore === "number" ? o.culturalStrengthScore : undefined,
+    attention: o.attentionScore,
+  };
 }

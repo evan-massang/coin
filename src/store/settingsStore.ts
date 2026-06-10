@@ -186,6 +186,14 @@ export const SettingsSchema = z.object({
   manusMaxPerHour: z.number().int().min(1).max(60).default(6),
   manusPollSec: z.number().int().min(5).max(300).default(20),
   manusTimeoutMin: z.number().int().min(5).max(180).default(45),
+  /** Hermes Phase 3 — recurring Manus DISCOVERY missions: Manus hunts fresh
+   *  $50k-500k candidates itself (operator playbook prompt); every returned mint
+   *  is injected into the local pipeline for Stage-0 verification + monitoring.
+   *  Off by default — each mission costs Manus credits. */
+  manusDiscoveryEnabled: z.boolean().default(false),
+  manusDiscoveryIntervalMin: z.number().int().min(15).max(1440).default(60),
+  /** How many candidates to ask for per discovery mission. */
+  manusDiscoveryCandidates: z.number().int().min(3).max(12).default(6),
 
   // ── AI Council (multi-model; advisory only — never overrides safety/risk) ──
   /** Master switch for the OpenCode-routed council seats (GPT-4o/DeepSeek/Qwen…). */

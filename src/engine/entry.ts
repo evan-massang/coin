@@ -97,8 +97,10 @@ export class EntryPipeline {
 
   start(): void {
     // Expose tracking state to read-only consumers (the mission board reports
-    // honestly whether a pasted result can still re-score a coin).
+    // honestly whether a pasted result can still re-score a coin), and the
+    // injection hook Manus discovery uses to hand candidates to this pipeline.
     this.svc.runtime.isTracked = (mint: string) => this.sm.has(mint);
+    this.svc.runtime.injectToken = (t) => this.injectToken(t);
     this.pump.on({
       onNewToken: (t) => void this.handleNewToken(t),
       onTrade: (t) => this.handleTrade(t),
@@ -438,6 +440,7 @@ export class EntryPipeline {
     if (devSold) flags.push("dev-sold");
     if (hypeData?.isRevival) flags.push("revival");
     if (tracked.token.discoverySource === "scan") flags.push("src:scan"); // maturing-survivor scanner (A/B + shadow)
+    if (tracked.token.discoverySource === "manus") flags.push("src:manus"); // Manus discovery candidate (Hermes Phase 3)
 
     // Per-facet confidence: unknown agents (couldn't compute) are dropped from the
     // conviction blend rather than anchoring it at a frozen default (Cycle 1 fix).
