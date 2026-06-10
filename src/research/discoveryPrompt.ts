@@ -47,12 +47,35 @@ export const DISCOVERY_SCHEMA = {
   required: ["candidates", "rejectedCount", "marketNote"],
 } as const;
 
-/** The operator's hunting playbook, operationalized. */
-export function discoveryPrompt(candidateCount: number): string {
+/** A live candidate from the engine's own real-time feeds, seeded into the hunt. */
+export interface DiscoverySeed {
+  mint: string;
+  symbol?: string;
+  note?: string;
+}
+
+/** The operator's hunting playbook, operationalized. `seeds` are minutes-old
+ *  candidates from OUR real-time feeds (PumpPortal newborns + the DexScreener
+ *  Golden-Filter scanner) — cloud agents can't see hours-old micro-caps through
+ *  public APIs (proven by discovery #8: latency/region limits), so the engine
+ *  contributes the data edge and Manus contributes verification + social digging. */
+export function discoveryPrompt(candidateCount: number, seeds: DiscoverySeed[] = []): string {
+  const seedBlock = seeds.length
+    ? `
+LIVE SEED CANDIDATES — start here. These are MINUTES-OLD coins our local real-time
+feeds (pump.fun stream + DexScreener graduate scanner) surfaced just now; public
+APIs you can reach may lag behind them. For EACH seed: paste the mint into
+RugCheck.xyz and DexScreener, then dig the socials. Reject freely — seeds carry
+no presumption of quality:
+${seeds.map((s, i) => `${i + 1}. ${s.symbol ? `$${s.symbol}` : "(unknown ticker)"} — mint: ${s.mint}${s.note ? ` — ${s.note}` : ""}`).join("\n")}
+
+ALSO hunt beyond the seeds wherever you have live data access.
+`
+    : "";
   return `SOLANA MEME-COIN DISCOVERY MISSION — find the next runners BEFORE they run.
 
-You are NOT reviewing a pre-selected coin. Hunt independently and return the top ${candidateCount} candidates with the highest chance of blowing up in the next hours. Review MANY coins (20-50+) and reject ruthlessly — report how many you rejected.
-
+You are NOT reviewing a pre-selected coin. Hunt and return the top ${candidateCount} candidates with the highest chance of blowing up in the next hours. Review MANY coins and reject ruthlessly — report how many you rejected.
+${seedBlock}
 WHERE TO HUNT:
 - DexScreener: filter Solana, sort by new pairs. Pump.fun "about to graduate" section — those already survived the worst rug phase. Photon/BullX trending if accessible.
 

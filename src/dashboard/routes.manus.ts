@@ -41,13 +41,15 @@ export function manusRoutes(svc: Services): Router {
   });
 
   // The exact prompt a researcher gets for a mission (Phase 8 — nothing hidden).
+  // Discovery/deepdive prompts embed dispatch-time live seeds, so the verbatim
+  // dispatched text is stored on the mission; research prompts re-render deterministically.
   r.get("/manus/mission/:id/prompt", (req, res) => {
     const row = svc.missions.get(parseInt(req.params.id, 10));
     if (!row) {
       res.status(404).json({ ok: false, error: "mission not found" });
       return;
     }
-    res.type("text/plain").send(missionToPrompt(row.mission));
+    res.type("text/plain").send(row.mission.renderedPrompt ?? missionToPrompt(row.mission));
   });
 
   // Hermes Phase 3 — fire a DISCOVERY mission: Manus hunts candidates with the

@@ -47,6 +47,11 @@ describe("ManusMissionRunner", () => {
       missions,
       attention: { injectResult: (rec: { mint: string; source: string; scores: { attention: number } }) => injected.push({ mint: rec.mint, source: rec.source, attention: rec.scores.attention }) },
       runtime: { injectToken: (t: { mint: string; symbol?: string; discoverySource?: string }) => injectedTokens.push(t) },
+      signals: {
+        recent: () => [
+          { mint: "SeedMint11111111111111111111111111111111111", symbol: "SEED", verdict: "WATCH_ONLY", conviction: 52, flags: ["src:scan"], at: now - 60_000 },
+        ],
+      },
     } as unknown as Services;
   });
   afterEach(() => db.close());
@@ -156,6 +161,16 @@ describe("ManusMissionRunner", () => {
     expect(injected.map((i) => i.mint)).toEqual([validA, validB]);
     expect(injected[0].source).toBe("manus");
     expect(injected[0].attention).toBe(72);
+  });
+
+  it("DISCOVERY: the hunt prompt is SEEDED with the engine's live shortlist", async () => {
+    const f = fetchScript([{ status: 200, body: { ok: true, task_id: "TS" } }]);
+    const r = runner(f);
+    await r.dispatchDiscovery("operator");
+    const body = JSON.parse((f as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.message.content).toContain("SeedMint11111111111111111111111111111111111");
+    expect(body.message.content).toMatch(/LIVE SEED CANDIDATES/);
+    expect(body.message.content).toMatch(/GRADUATED \(golden-filter scanner\)/);
   });
 
   it("DISCOVERY scheduling: auto-dispatches on interval, never doubles up while one is in flight", async () => {

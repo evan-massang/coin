@@ -40,5 +40,9 @@ export interface Mission {
   gaps: MissionBucketKey[];
   /** The strict response shape we want back (parseable, advisory). */
   outputContract: string;
+  /** The EXACT prompt text dispatched to the provider (Phase 8: nothing hidden).
+   *  Set at dispatch time for discovery/deepdive whose prompts embed live seeds;
+   *  per-coin research prompts are deterministic re-renders so may omit it. */
+  renderedPrompt?: string;
   createdAt: number;
 }

@@ -4,7 +4,7 @@ import type { MissionResult, MissionRow } from "../store/repositories/missionRep
 import { ManusClient, latestAgentStatus, extractStructuredResult, extractErrorMessage } from "./manusClient.js";
 import { composeMissionForMint } from "./composeMission.js";
 import { missionToPrompt, MANUS_RECOMMENDATION_SCHEMA } from "./missionPrompt.js";
-import { discoveryPrompt, deepdivePrompt, DISCOVERY_SCHEMA, DEEPDIVE_SCHEMA } from "./discoveryPrompt.js";
+import { discoveryPrompt, deepdivePrompt, DISCOVERY_SCHEMA, DEEPDIVE_SCHEMA, type DiscoverySeed } from "./discoveryPrompt.js";
 import { resultToRecord } from "./missionResult.js";
 import { isValidSolanaAddress } from "../sources/solanaRpc.js";
 import { metrics } from "../util/metrics.js";
@@ -97,8 +97,11 @@ export class ManusMissionRunner {
     if (this.svc.missions.hasActiveOfKind("discovery")) return { ok: false, error: "a discovery mission is already in flight" };
     const n = this.svc.settings.get("manusDiscoveryCandidates");
     const now = this.now();
-    const prompt = discoveryPrompt(n);
-    const id = this.svc.missions.insert(pseudoMission("discovery", "SCAN", `Discovery: hunt the top ${n} Solana meme candidates ($50k-500k mcap, hard rug filter, real humans, pre-influencer).`, now), "discovery");
+    const seeds = this.discoverySeeds(now);
+    const prompt = discoveryPrompt(n, seeds);
+    const mission = pseudoMission("discovery", "SCAN", `Discovery: hunt the top ${n} Solana meme candidates ($50k-500k mcap, hard rug filter, real humans, pre-influencer). Seeded with ${seeds.length} live local candidates.`, now);
+    mission.renderedPrompt = prompt; // Phase 8: the EXACT dispatched prompt is stored
+    const id = this.svc.missions.insert(mission, "discovery");
     try {
       const created = await this.client().createTask({
         prompt,
@@ -116,15 +119,35 @@ export class ManusMissionRunner {
     }
   }
 
+  /** Seed the hunt with the engine's OWN live shortlist — the data edge cloud
+   *  agents lack (discovery #8 proved public APIs can't see hours-old micro-caps).
+   *  BUYs first, then Golden-Filter graduates, then strong WATCHes; last 45 min. */
+  private discoverySeeds(now: number): DiscoverySeed[] {
+    const recent = this.svc.signals.recent(200).filter(
+      (s) => now - s.at <= 45 * 60_000 && (s.verdict === "BUY_SMALL" || s.verdict === "BUY_STRONG" || s.verdict === "WATCH_ONLY"),
+    );
+    const seen = new Set<string>();
+    const rank = (s: (typeof recent)[number]): number =>
+      s.verdict !== "WATCH_ONLY" ? 0 : s.flags.includes("src:scan") ? 1 : 2;
+    return recent
+      .sort((a, b) => rank(a) - rank(b) || b.conviction - a.conviction)
+      .filter((s) => (seen.has(s.mint) ? false : (seen.add(s.mint), true)))
+      .slice(0, 12)
+      .map((s) => ({
+        mint: s.mint,
+        symbol: s.symbol,
+        note: `local engine: ${s.verdict} conviction ${s.conviction}${s.flags.includes("src:scan") ? " · GRADUATED (golden-filter scanner)" : " · pump.fun newborn"}`,
+      }));
+  }
+
   /** Batched hard-opinion review: MANY coins in ONE mission (never one-at-a-time). */
   async dispatchDeepdive(coins: Array<{ mint: string; symbol?: string; note?: string }>, trigger: "operator" | "auto"): Promise<{ ok: boolean; id?: number; taskUrl?: string; error?: string }> {
     if (!this.available()) return { ok: false, error: "no Manus API key configured" };
     if (!coins.length) return { ok: false, error: "no coins to review" };
     const now = this.now();
-    const id = this.svc.missions.insert(
-      pseudoMission("deepdive", `${coins.length} COINS`, `Deep-dive: batched hard opinion on ${coins.map((c) => `$${c.symbol ?? c.mint.slice(0, 6)}`).join(", ")}`, now),
-      "deepdive",
-    );
+    const ddMission = pseudoMission("deepdive", `${coins.length} COINS`, `Deep-dive: batched hard opinion on ${coins.map((c) => `$${c.symbol ?? c.mint.slice(0, 6)}`).join(", ")}`, now);
+    ddMission.renderedPrompt = deepdivePrompt(coins); // Phase 8: exact prompt stored
+    const id = this.svc.missions.insert(ddMission, "deepdive");
     try {
       const created = await this.client().createTask({
         prompt: deepdivePrompt(coins),
