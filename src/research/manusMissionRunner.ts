@@ -228,16 +228,19 @@ export class ManusMissionRunner {
       // moment none is in flight — a RESOLVED mission chains immediately; after a
       // FAILED/cancelled one the interval setting acts as a cooldown so a broken
       // dispatch can't spin-burn credits.
+      // PRODUCTIVE results chain immediately; EMPTY/refused/failed ones wait the
+      // cooldown — max hunts #19/#20 proved Manus sometimes bails or refuses in
+      // seconds, and instant-chaining those burned a mission every ~3 minutes.
       if (this.svc.settings.get("manusDiscoveryEnabled") && !this.svc.missions.hasActiveOfKind("discovery")) {
         const last = this.svc.missions.latestByKind("discovery");
         const cooldownMs = this.svc.settings.get("manusDiscoveryIntervalMin") * 60_000;
-        const ready = !last || last.status === "resolved" || (last.resolvedAt ?? last.createdAt) + cooldownMs <= this.now();
+        const ready = !last || (last.status === "resolved" && producedSomething(last)) || (last.resolvedAt ?? last.createdAt) + cooldownMs <= this.now();
         if (ready) await this.dispatchDiscovery("auto");
       }
       const ddMin = this.svc.settings.get("manusAutoDeepdiveMin");
       if (ddMin > 0 && !this.svc.missions.hasActiveOfKind("deepdive")) {
         const lastDd = this.svc.missions.latestByKind("deepdive");
-        const ready = !lastDd || lastDd.status === "resolved" || (lastDd.resolvedAt ?? lastDd.createdAt) + ddMin * 60_000 <= this.now();
+        const ready = !lastDd || (lastDd.status === "resolved" && producedSomething(lastDd)) || (lastDd.resolvedAt ?? lastDd.createdAt) + ddMin * 60_000 <= this.now();
         if (ready) {
           const open = this.svc.paperPositions
             .byStatus(true)
@@ -438,6 +441,13 @@ export class ManusMissionRunner {
 /** Minimal Mission wrapper for non-per-coin missions (discovery/deepdive). */
 function pseudoMission(mint: string, symbol: string, objective: string, now: number): Mission {
   return { mint, symbol, objective, verdict: "-", conviction: 0, buckets: [], gaps: [], outputContract: "structured (see schema)", createdAt: now };
+}
+
+/** Did a resolved mission actually deliver picks/verdicts? Empty or refused
+ *  answers don't earn an immediate re-chain (cooldown applies instead). */
+function producedSomething(m: MissionRow): boolean {
+  const raw = m.resultRaw as { candidates?: unknown[]; results?: unknown[]; mints?: unknown[] } | undefined;
+  return Boolean((raw?.candidates?.length ?? 0) + (raw?.results?.length ?? 0) + (raw?.mints?.length ?? 0));
 }
 
 function num(x: unknown, fallback: number): number {
