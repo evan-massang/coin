@@ -1,0 +1,75 @@
+diff --git a/src/engine/exitEngine.ts b/src/engine/exitEngine.ts
+index db90a42..b5d36e8 100644
+--- a/src/engine/exitEngine.ts
++++ b/src/engine/exitEngine.ts
+@@ -32,8 +32,30 @@ export function buildDefaultLadder(): LadderRung[] {
+   ];
+ }
+ 
+-export function defaultExitPlan(maxHoldMs: number, trailingStopPct = 0.3): ExitPlan {
+-  return { ladder: buildDefaultLadder(), trailingStopPct, maxHoldMs };
++// ── FIRST-SPIKE exit style (experimental; OFF by default) ───────────────────
++// Hypothesis (operator, 2026-06): "when it hits its first big spike, just go."
++// Sell (almost) the whole position at the first spike to `multiple`, optionally
++// keeping a small runner for the trailing stop. This is the extreme version of
++// the Cycle-8 early-harvest finding (sub-2x pops round-trip to losses). It caps
++// the right tail, so it must EARN its place: run scripts/research/
++// spike_exit_sweep.ts on recorded data and only enable `exitStyle=firstSpike`
++// if realized PnL beats the early-harvest ladder on BOTH ordering bounds.
++export type ExitStyle = "earlyHarvest" | "firstSpike";
++
++export function buildFirstSpikeLadder(spikeMultiple = 1.5, keepRunnerPct = 0): LadderRung[] {
++  const sellPct = Math.min(1, Math.max(0.5, 1 - keepRunnerPct));
++  return [{ multiple: Math.max(1.05, spikeMultiple), sellPct, done: false }];
++}
++
++export function defaultExitPlan(
++  maxHoldMs: number,
++  trailingStopPct = 0.3,
++  style: ExitStyle = "earlyHarvest",
++  spikeMultiple = 1.5,
++  spikeKeepRunnerPct = 0,
++): ExitPlan {
++  const ladder = style === "firstSpike" ? buildFirstSpikeLadder(spikeMultiple, spikeKeepRunnerPct) : buildDefaultLadder();
++  return { ladder, trailingStopPct, maxHoldMs };
+ }
+ 
+ export interface HardSignals {
+diff --git a/src/paper/paperExecution.ts b/src/paper/paperExecution.ts
+index c8881df..2c3c4e7 100644
+--- a/src/paper/paperExecution.ts
++++ b/src/paper/paperExecution.ts
+@@ -111,7 +111,13 @@ export class PaperTrader {
+     );
+     // Install the real exit ladder on a freshly opened paper position.
+     if (res.marked === "entered" && res.position) {
+-      res.position.exitPlan = defaultExitPlan(s.maxHoldMinutes * 60_000);
++      res.position.exitPlan = defaultExitPlan(
++        s.maxHoldMinutes * 60_000,
++        0.3,
++        s.exitStyle,
++        s.spikeExitMultiple,
++        s.spikeExitKeepRunnerPct,
++      );
+       this.svc.paperPositions.update(res.position);
+     }
+     this.svc.paper.recordFill({
+diff --git a/src/store/settingsStore.ts b/src/store/settingsStore.ts
+index e61ca0d..e41b63b 100644
+--- a/src/store/settingsStore.ts
++++ b/src/store/settingsStore.ts
+@@ -38,6 +38,14 @@ export const SettingsSchema = z.object({
+    *  the early-harvest ladder reduces the loser bleed on both ordering bounds without
+    *  losing winners (100% of 2x-winners breach −45% anyway). Reversible setting. */
+   stopLossPct: z.number().min(0).max(0.9).default(0.4),
++  /** Exit style. "earlyHarvest" = Cycle-8 ladder (default). "firstSpike" = sell
++   *  (nearly) everything at the first spike to `spikeExitMultiple` — experimental;
++   *  enable ONLY after scripts/research/spike_exit_sweep.ts shows it beats the
++   *  ladder on realized PnL on both ordering bounds. NOT auto-tunable. */
++  exitStyle: z.enum(["earlyHarvest", "firstSpike"]).default("earlyHarvest"),
++  spikeExitMultiple: z.number().min(1.05).max(10).default(1.5),
++  /** Fraction kept as a runner after the spike sell (0 = sell everything). */
++  spikeExitKeepRunnerPct: z.number().min(0).max(0.5).default(0),
+   minLiquidityUsd: z.number().min(0).default(3000),
+ 
+   // ── Paper trading (Mode 3 — simulation only) ──

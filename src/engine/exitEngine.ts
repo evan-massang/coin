@@ -32,8 +32,30 @@ export function buildDefaultLadder(): LadderRung[] {
   ];
 }
 
-export function defaultExitPlan(maxHoldMs: number, trailingStopPct = 0.3): ExitPlan {
-  return { ladder: buildDefaultLadder(), trailingStopPct, maxHoldMs };
+// ── FIRST-SPIKE exit style (experimental; OFF by default) ───────────────────
+// Hypothesis (operator, 2026-06): "when it hits its first big spike, just go."
+// Sell (almost) the whole position at the first spike to `multiple`, optionally
+// keeping a small runner for the trailing stop. This is the extreme version of
+// the Cycle-8 early-harvest finding (sub-2x pops round-trip to losses). It caps
+// the right tail, so it must EARN its place: run scripts/research/
+// spike_exit_sweep.ts on recorded data and only enable `exitStyle=firstSpike`
+// if realized PnL beats the early-harvest ladder on BOTH ordering bounds.
+export type ExitStyle = "earlyHarvest" | "firstSpike";
+
+export function buildFirstSpikeLadder(spikeMultiple = 1.5, keepRunnerPct = 0): LadderRung[] {
+  const sellPct = Math.min(1, Math.max(0.5, 1 - keepRunnerPct));
+  return [{ multiple: Math.max(1.05, spikeMultiple), sellPct, done: false }];
+}
+
+export function defaultExitPlan(
+  maxHoldMs: number,
+  trailingStopPct = 0.3,
+  style: ExitStyle = "earlyHarvest",
+  spikeMultiple = 1.5,
+  spikeKeepRunnerPct = 0,
+): ExitPlan {
+  const ladder = style === "firstSpike" ? buildFirstSpikeLadder(spikeMultiple, spikeKeepRunnerPct) : buildDefaultLadder();
+  return { ladder, trailingStopPct, maxHoldMs };
 }
 
 /** Hermes Phase 13/14 — ADVISORY thesis-decay annotation for exit alerts. Pure:

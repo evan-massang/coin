@@ -38,6 +38,14 @@ export const SettingsSchema = z.object({
    *  the early-harvest ladder reduces the loser bleed on both ordering bounds without
    *  losing winners (100% of 2x-winners breach −45% anyway). Reversible setting. */
   stopLossPct: z.number().min(0).max(0.9).default(0.4),
+  /** Exit style. "earlyHarvest" = Cycle-8 ladder (default). "firstSpike" = sell
+   *  (nearly) everything at the first spike to `spikeExitMultiple` — experimental;
+   *  enable ONLY after scripts/research/spike_exit_sweep.ts shows it beats the
+   *  ladder on realized PnL on both ordering bounds. NOT auto-tunable. */
+  exitStyle: z.enum(["earlyHarvest", "firstSpike"]).default("earlyHarvest"),
+  spikeExitMultiple: z.number().min(1.05).max(10).default(1.5),
+  /** Fraction kept as a runner after the spike sell (0 = sell everything). */
+  spikeExitKeepRunnerPct: z.number().min(0).max(0.5).default(0),
   minLiquidityUsd: z.number().min(0).default(3000),
 
   // ── Paper trading (Mode 3 — simulation only) ──

@@ -116,7 +116,13 @@ export class PaperTrader {
     );
     // Install the real exit ladder on a freshly opened paper position.
     if (res.marked === "entered" && res.position) {
-      res.position.exitPlan = defaultExitPlan(s.maxHoldMinutes * 60_000);
+      res.position.exitPlan = defaultExitPlan(
+        s.maxHoldMinutes * 60_000,
+        0.3,
+        s.exitStyle,
+        s.spikeExitMultiple,
+        s.spikeExitKeepRunnerPct,
+      );
       this.svc.paperPositions.update(res.position);
     }
     this.svc.paper.recordFill({
