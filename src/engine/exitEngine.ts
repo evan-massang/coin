@@ -70,6 +70,31 @@ export function thesisDecayFlags(currentAttention: number | undefined, entryAtte
   return [];
 }
 
+// ── SHADOW velocityExit (operator experiment, 2026-06-12) ───────────────────
+// Hypothesis: a violent in-profit spike (≥X pp gained within ≤90s) is the local
+// top — selling INTO the velocity beats waiting for the ladder/trailing stop.
+// Runs as pure instrumentation: would-be sells are journaled per variant,
+// verdicts never change. Decision rule: after 3-5 days of accrual, each
+// variant's realized PnL (sell at trigger, minus slippage) is compared against
+// what the real exits did on the same positions, and against the firstSpike
+// sweep bounds — only a both-bounds winner may graduate to a real exit style.
+export const VELOCITY_SHADOW_VARIANTS = [8, 12, 15] as const;
+export const VELOCITY_WINDOW_MS = 90_000;
+
+/** Pure: pp gained inside the window, or undefined when the shadow can't judge
+ *  (not in profit / no baseline anywhere in the window). Entry counts as a 0pp
+ *  baseline while it is inside the window (first ticks of a position's life). */
+export function velocityShadowGain(
+  pnlPct: number,
+  baseSamplePnl: number | undefined,
+  entryInWindow: boolean,
+): number | undefined {
+  if (pnlPct <= 0) return undefined; // "a position in profit" — per the spec
+  const base = Math.min(baseSamplePnl ?? Infinity, entryInWindow ? 0 : Infinity);
+  if (!Number.isFinite(base)) return undefined;
+  return pnlPct - base;
+}
+
 export interface HardSignals {
   devWalletSold?: boolean;
   topHolderDumping?: boolean;
@@ -226,10 +251,11 @@ export class ExitEngine {
     const maxHoldMs = this.svc.settings.get("maxHoldMinutes") * 60_000;
     const now = Date.now();
 
-    // Keep the profit-chart sample table bounded (rolling ~6h), checked ~every 10m.
+    // Sample retention extended 6h → 14 DAYS (operator, 2026-06-12): tick paths
+    // must accrue to validate the velocityExit shadow + future exit experiments.
     if (this.source === "paper" && now - this.lastPruneAt > 10 * 60_000) {
       this.lastPruneAt = now;
-      this.svc.paper.pruneSamples(now - 6 * 60 * 60_000);
+      this.svc.paper.pruneSamples(now - 14 * 24 * 60 * 60_000);
     }
 
     // Price EVERY open position this tick (batched, ≤30/call) so a fast crash is
@@ -247,7 +273,31 @@ export class ExitEngine {
       // Record the profit trajectory (PnL % vs entry) for the dashboard chart —
       // paper positions only (the coins we actually "bought").
       if (this.source === "paper" && pos.entryPriceUsd > 0) {
-        this.svc.paper.recordPriceSample(pos.id, now, (priceUsd / pos.entryPriceUsd - 1) * 100);
+        const pnlPct = (priceUsd / pos.entryPriceUsd - 1) * 100;
+        // Baseline BEFORE inserting the current sample (else base = current → 0).
+        let gain: number | undefined;
+        try {
+          const base = this.svc.paper.earliestPnlSince(pos.id, now - VELOCITY_WINDOW_MS);
+          gain = velocityShadowGain(pnlPct, base, pos.entryAtMs >= now - VELOCITY_WINDOW_MS);
+        } catch {
+          gain = undefined; // shadow must never break the exit tick
+        }
+        this.svc.paper.recordPriceSample(pos.id, now, pnlPct);
+        if (gain !== undefined) {
+          for (const variant of VELOCITY_SHADOW_VARIANTS) {
+            if (gain < variant) continue;
+            try {
+              const fresh = this.svc.paper.recordVelocityShadow({
+                positionId: pos.id, variantPct: variant, mint: pos.mint, symbol: pos.symbol,
+                entryAt: pos.entryAtMs, triggeredAt: now, triggerPriceUsd: priceUsd,
+                pnlPctAtTrigger: pnlPct, gainWindowPp: gain, windowMs: VELOCITY_WINDOW_MS,
+              });
+              if (fresh) log.info(`shadow velocityExit[${variant}pp]: $${pos.symbol ?? pos.mint.slice(0, 6)} +${pnlPct.toFixed(1)}% (gained ${gain.toFixed(1)}pp ≤90s) — would sell @${priceUsd}`);
+            } catch {
+              /* shadow only */
+            }
+          }
+        }
       }
 
       const evalResult = evaluateExit(

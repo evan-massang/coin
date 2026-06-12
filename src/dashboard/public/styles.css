@@ -258,3 +258,23 @@ a { color: var(--green-2); text-decoration: none; cursor: pointer; }
 @media (max-width: 900px) {
   .maingrid, .botgrid, .tiles { grid-template-columns: 1fr; }
 }
+
+/* ── RESEARCH CAM — CCTV view of the research browser ── */
+.camgrid { margin-top: 14px; }
+.cam-cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr); gap: 12px; }
+.cam-screen { position: relative; background: #0c0e0c; border: 3px solid var(--ink); border-radius: 6px; min-height: 280px; overflow: hidden; box-shadow: inset 0 0 40px rgba(0,0,0,0.7), 3px 3px 0 rgba(0,0,0,0.15); }
+.cam-screen img { display: none; width: 100%; height: auto; }
+.cam-screen.cam-live img { display: block; }
+.cam-screen.cam-live .cam-nosignal { display: none; }
+.cam-nosignal { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #4d5a4d; font-family: var(--pixel); font-size: 14px; letter-spacing: 2px; text-align: center; background: repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 3px); }
+.cam-nosignal .small { font-family: var(--mono); font-size: 12px; letter-spacing: 0; text-transform: none; }
+.cam-overlay { position: absolute; left: 0; right: 0; top: 0; display: flex; gap: 10px; align-items: center; padding: 6px 10px; font-family: var(--mono); font-size: 13px; color: #d9e3d9; background: linear-gradient(rgba(0,0,0,0.55), transparent); pointer-events: none; }
+.cam-rec { color: #ff5b4d; font-weight: bold; visibility: hidden; }
+.cam-screen.cam-live .cam-rec { visibility: visible; animation: blink 1.2s infinite; }
+.cam-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cam-ts { margin-left: auto; }
+.cam-ticker-wrap { min-width: 0; }
+.cam-ticker { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.cam-act { font-family: var(--mono); font-size: 13px; color: var(--ink); border-left: 3px solid var(--green); background: rgba(0,0,0,0.03); padding: 3px 8px; border-radius: 2px; }
+.cam-act .t { color: var(--muted); margin-right: 6px; }
+@media (max-width: 900px) { .cam-cols { grid-template-columns: 1fr; } }

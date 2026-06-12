@@ -487,6 +487,34 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE paper_trades ADD COLUMN flags TEXT;
     `,
   },
+  {
+    version: 16,
+    up: /* sql */ `
+      -- SHADOW velocityExit experiment (operator, 2026-06-12): if an in-profit
+      -- paper position gains ≥X pp within ≤90s, record the would-be sell price +
+      -- timestamp — one row per (position, variant), NEVER changing a verdict.
+      -- Variants X ∈ {8, 12, 15} run in parallel; compare realized PnL of each
+      -- vs what actually happened after 3-5 days of accrual.
+      CREATE TABLE IF NOT EXISTS shadow_velocity_exits (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        position_id        INTEGER NOT NULL,
+        variant_pct        REAL NOT NULL,
+        mint               TEXT NOT NULL,
+        symbol             TEXT,
+        entry_at           INTEGER NOT NULL,
+        triggered_at       INTEGER NOT NULL,
+        trigger_price_usd  REAL NOT NULL,
+        pnl_pct_at_trigger REAL NOT NULL,
+        gain_window_pp     REAL NOT NULL,
+        window_ms          INTEGER NOT NULL,
+        UNIQUE(position_id, variant_pct)
+      );
+      CREATE INDEX IF NOT EXISTS idx_shadow_velocity_at ON shadow_velocity_exits(triggered_at);
+      -- Tick-path validation needs history: index supports the 90s window lookups
+      -- now that retention is extended 6h → 14d (exitEngine).
+      CREATE INDEX IF NOT EXISTS idx_paper_samples_pos_at ON paper_price_samples(position_id, at);
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

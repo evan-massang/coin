@@ -87,6 +87,9 @@ export interface Services {
   manus?: import("./research/manusMissionRunner.js").ManusMissionRunner;
   /** Durable attention research store (Project Athena meme graveyard). */
   attentionRepo: AttentionRepo;
+  /** RESEARCH CAM — live CCTV view of the research browser (frames + actions).
+   *  Attached in index.ts; absent in tests. Pure observation, sends no input. */
+  cam?: import("./browser/browserCam.js").BrowserCam;
 }
 
 export function createServices(db: DB = getDb()): Services {

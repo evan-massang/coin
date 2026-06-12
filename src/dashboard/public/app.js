@@ -665,6 +665,8 @@ function connectWs() {
       if (isBuy(a.verdict) || a.verdict === "SELL_TRIM" || a.verdict === "SELL_EXIT_NOW") toast(a);
     } else if (m.type === "paper" && m.data && m.data.reset) {
       loadAll();
+    } else if (m.type === "browsercam") {
+      camMessage(m.data);
     } else if (m.type === "council") {
       const e = m.data;
       if (!STATE.councilLive || STATE.councilLive.mint !== e.mint) {
@@ -679,6 +681,54 @@ function connectWs() {
   };
 }
 
+// ── RESEARCH CAM — CCTV view of the read-only research browser ──
+const CAM = { live: false, lastFrameAt: 0 };
+function camMessage(d) {
+  if (!d) return;
+  if (d.kind === "status") {
+    CAM.live = d.status === "live";
+    $("#cam-screen").classList.toggle("cam-live", CAM.live && Date.now() - CAM.lastFrameAt < 60_000);
+    $("#cam-status").innerHTML = CAM.live ? `<span class="green">● LIVE</span>` : `<span class="muted">NO SIGNAL</span>`;
+    if (d.label) $("#cam-label").textContent = d.label;
+  } else if (d.kind === "frame") {
+    CAM.lastFrameAt = d.at || Date.now();
+    const img = $("#cam-frame");
+    img.src = `data:image/jpeg;base64,${d.jpeg}`;
+    $("#cam-screen").classList.add("cam-live");
+    $("#cam-ts").textContent = new Date(CAM.lastFrameAt).toISOString().slice(11, 19) + " UTC";
+    if (!CAM.live) { CAM.live = true; $("#cam-status").innerHTML = `<span class="green">● LIVE</span>`; }
+  } else if (d.kind === "action") {
+    camAction(d);
+  }
+}
+function camAction(a) {
+  const box = $("#cam-ticker");
+  if (!box) return;
+  if (box.firstElementChild && box.firstElementChild.classList.contains("muted")) box.innerHTML = "";
+  const el = document.createElement("div");
+  el.className = "cam-act";
+  el.innerHTML = `<span class="t">${new Date(a.at || Date.now()).toISOString().slice(11, 19)}</span>${esc(a.text)}`;
+  box.prepend(el);
+  while (box.children.length > 14) box.lastElementChild.remove();
+}
+async function loadCam() {
+  const c = await api("/browsercam").catch(() => null);
+  if (!c) return;
+  CAM.live = c.status === "live";
+  $("#cam-status").innerHTML = CAM.live ? `<span class="green">● LIVE</span>` : `<span class="muted">NO SIGNAL</span>`;
+  if (c.label) $("#cam-label").textContent = c.label;
+  for (const a of c.actions || []) camAction(a);
+  if (!c.browserEnabled) camAction({ at: Date.now(), text: "⚠ browser dives are OFF — enable 'research browser dives' in CONFIG" });
+}
+$("#cam-dive").onclick = async () => {
+  const r = await api("/browsercam/dive", { method: "POST", body: {} }).catch(() => null);
+  if (!r || !r.ok) { $("#cam-status").innerHTML = `<span class="red">${esc((r && r.error) || "dive failed")}</span>`; return; }
+  // Don't touch #cam-status here — the ws "status: live" message owns it (a
+  // local "starting…" would race and overwrite ● LIVE mid-dive).
+  camAction({ at: Date.now(), text: `dive queued for $${r.symbol || (r.mint || "").slice(0, 6)}` });
+};
+loadCam();
+
 // ── config overlay ──
 const CFG = [
   { k: "walletAddress", label: "public wallet address", t: "text", full: true },
@@ -687,6 +737,8 @@ const CFG = [
   { k: "paperStartingBalanceSol", label: "paper start (SOL)", t: "number" },
   { k: "minConviction", label: "min conviction notify", t: "number" },
   { k: "minMomentumForBuy", label: "min momentum for BUY (0=off; 85=audit edge)", t: "number" },
+  { k: "attentionUseBrowser", label: "research browser dives (RESEARCH CAM source)", t: "checkbox" },
+  { k: "browserDriver", label: "research browser driver", t: "select", opts: ["agent-browser", "playwright"] },
   { k: "riskMode", label: "risk mode", t: "select", opts: ["microfish", "fixed"] },
   { k: "heliusApiKey", label: "helius key", t: "secret" },
   { k: "anthropicApiKey", label: "anthropic key (Claude seat)", t: "secret" },

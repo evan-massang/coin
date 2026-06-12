@@ -113,6 +113,10 @@ export const SettingsSchema = z.object({
   /** Also try Reddit/DDG via a real browser during research (slow + flaky here due
    *  to an HTTPS-inspection layer). Default off → fast, reliable News+Wikipedia. */
   attentionUseBrowser: z.boolean().default(false),
+  /** Research browser driver. agent-browser = fast Rust CLI (verified working on
+   *  this machine; streams to the dashboard RESEARCH CAM). playwright = legacy
+   *  path, also the automatic fallback when the CLI is missing. */
+  browserDriver: z.enum(["agent-browser", "playwright"]).default("agent-browser"),
   /** Re-research a coin only if its cached attention is older than this (minutes). */
   attentionTtlMin: z.number().int().min(1).max(360).default(30),
   /** Athena Readiness Gate (Phase 21): hold a would-be BUY at WATCH until attention

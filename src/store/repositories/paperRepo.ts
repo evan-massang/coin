@@ -141,6 +141,38 @@ export class PaperRepo {
     return r.m ?? undefined;
   }
 
+  /** Earliest sampled PnL% at/after `sinceMs` (velocityExit shadow's 90s base). */
+  earliestPnlSince(positionId: number, sinceMs: number): number | undefined {
+    const r = this.db
+      .prepare("SELECT pnl_pct FROM paper_price_samples WHERE position_id=? AND at >= ? ORDER BY at ASC LIMIT 1")
+      .get(positionId, sinceMs) as { pnl_pct: number } | undefined;
+    return r?.pnl_pct;
+  }
+
+  /** SHADOW velocityExit: record a would-be sell. First trigger per
+   *  (position, variant) wins — re-fires are ignored (UNIQUE). Never sells. */
+  recordVelocityShadow(s: {
+    positionId: number;
+    variantPct: number;
+    mint: string;
+    symbol?: string;
+    entryAt: number;
+    triggeredAt: number;
+    triggerPriceUsd: number;
+    pnlPctAtTrigger: number;
+    gainWindowPp: number;
+    windowMs: number;
+  }): boolean {
+    const info = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO shadow_velocity_exits
+           (position_id, variant_pct, mint, symbol, entry_at, triggered_at, trigger_price_usd, pnl_pct_at_trigger, gain_window_pp, window_ms)
+         VALUES (@positionId,@variantPct,@mint,@symbol,@entryAt,@triggeredAt,@triggerPriceUsd,@pnlPctAtTrigger,@gainWindowPp,@windowMs)`,
+      )
+      .run({ ...s, symbol: s.symbol ?? null });
+    return info.changes > 0;
+  }
+
   fillsCount(): number {
     const r = this.db.prepare("SELECT COUNT(*) n FROM paper_trades").get() as { n: number };
     return r.n;

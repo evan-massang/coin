@@ -1,5 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { platformFromUrl, decodeDdgHref, parseDdgResults, postsFromReddit, parseGoogleNewsRss, parseWikipediaSearch } from "./researchAgent.js";
+import { platformFromUrl, decodeDdgHref, parseDdgResults, postsFromReddit, parseGoogleNewsRss, parseWikipediaSearch, decodeBingHref, parseBingResults } from "./researchAgent.js";
+
+describe("decodeBingHref (agent-browser driver: Bing is the primary search source)", () => {
+  it("decodes the /ck/a u=a1<base64url> redirect to the real URL", () => {
+    const real = "https://www.tiktok.com/@dog/video/123";
+    const b64 = Buffer.from(real, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    expect(decodeBingHref(`https://www.bing.com/ck/a?!&&p=abc&u=a1${b64}&ntb=1`)).toBe(real);
+  });
+  it("passes through non-redirect or undecodable hrefs", () => {
+    expect(decodeBingHref("https://example.com/x")).toBe("https://example.com/x");
+    expect(decodeBingHref("https://www.bing.com/ck/a?u=a1!!!notb64")).toContain("bing.com/ck/a");
+  });
+});
+
+describe("parseBingResults", () => {
+  it("tags platforms via the DECODED url and drops empty rows", () => {
+    const real = "https://x.com/u/status/9";
+    const b64 = Buffer.from(real, "utf8").toString("base64").replace(/=+$/, "");
+    const posts = parseBingResults([
+      { title: "dogwifhat takes over", snippet: "the meme everywhere", href: `https://www.bing.com/ck/a?u=a1${b64}&ntb=1` },
+      { title: "", snippet: "", href: "https://www.bing.com/ck/a?u=a1xxx" },
+    ]);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].platform).toBe("twitter");
+    expect(posts[0].text).toMatch(/dogwifhat/);
+  });
+});
 
 describe("platformFromUrl", () => {
   it("maps domains to platforms", () => {

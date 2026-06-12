@@ -1,4 +1,5 @@
 import type { AttentionEvidence, AttentionPost } from "./types.js";
+import { AgentBrowser } from "../browser/agentBrowser.js";
 import { log } from "../util/logger.js";
 
 // Phase 2/3 — the ResearchAgent: collects free, public attention evidence about a
@@ -47,6 +48,35 @@ export function parseDdgResults(rows: { title: string; snippet: string; href: st
     const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
     if (!text) continue;
     out.push({ text, platform: platformFromUrl(url) });
+  }
+  return out;
+}
+
+/** Bing wraps result links as /ck/a?…&u=a1<base64url>… — decode to the real URL.
+ *  (Bing is the primary browser search source: verified reachable on this network,
+ *  while DuckDuckGo is ISP-blocked (Telkomsel "Internet Baik") and Brave serves a
+ *  bot-check captcha. The old DDG collector silently returned nothing here.) */
+export function decodeBingHref(href: string): string {
+  try {
+    const m = /[?&]u=a1([A-Za-z0-9_-]+={0,2})/.exec(href);
+    if (m) {
+      const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = Buffer.from(b64, "base64").toString("utf8");
+      if (/^https?:\/\//.test(decoded)) return decoded;
+    }
+  } catch {
+    /* fall through */
+  }
+  return href;
+}
+
+export function parseBingResults(rows: { title: string; snippet: string; href: string }[]): AttentionPost[] {
+  const out: AttentionPost[] = [];
+  for (const r of rows) {
+    const url = decodeBingHref(r.href);
+    const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
+    if (!text) continue;
+    out.push({ text: text.slice(0, 240), platform: platformFromUrl(url) });
   }
   return out;
 }
@@ -111,8 +141,14 @@ export function parseWikipediaSearch(json: { query?: { search?: { title?: string
 export interface ResearchOptions {
   headless?: boolean;
   maxPerQuery?: number;
-  /** Try Reddit/DDG via a real browser (slow, flaky — they block raw fetch). */
+  /** Try social/search via a real browser (slow, best-effort). */
   useBrowser?: boolean;
+  /** Browser driver: agent-browser (default; fast Rust CLI + CCTV stream) or
+   *  the legacy Playwright path (also the automatic fallback when the
+   *  agent-browser CLI is not installed). */
+  driver?: "agent-browser" | "playwright";
+  /** Narrator hook — every browser step is reported here (RESEARCH CAM ticker). */
+  onAction?: (text: string) => void;
 }
 
 async function fetchGoogleNews(query: string): Promise<AttentionPost[]> {
@@ -135,6 +171,63 @@ async function fetchWikipedia(term: string): Promise<WikiResult> {
   } catch {
     return { matched: false, isCrypto: false };
   }
+}
+
+// ── agent-browser collection (primary driver) ───────────────────────────────
+// Sources verified reachable on this network 2026-06-12: Bing web + Bing News
+// (DDG is ISP-blocked, Brave captcha-walls headless traffic). old.reddit stays
+// best-effort. All steps are open→wait→read; nothing is ever clicked or typed.
+
+const BING_EXTRACT = `JSON.stringify([...document.querySelectorAll('li.b_algo')].slice(0,12).map(r=>({title:(r.querySelector('h2')?.textContent||'').trim(),href:r.querySelector('h2 a, a')?.href||'',snippet:(r.querySelector('.b_caption p, .b_lineclamp2, p')?.textContent||'').trim().slice(0,160)})))`;
+const BING_NEWS_EXTRACT = `JSON.stringify([...document.querySelectorAll('.news-card, .newsitem, article')].slice(0,12).map(r=>({title:(r.querySelector('a.title, .title, a')?.textContent||'').trim(),href:r.querySelector('a.title, a')?.href||'',snippet:(r.querySelector('.snippet, p')?.textContent||'').trim().slice(0,160)})))`;
+const OLD_REDDIT_EXTRACT = `JSON.stringify([...document.querySelectorAll('.search-result-link')].slice(0,15).map(r=>({title:(r.querySelector('.search-title')?.textContent||'').trim(),author:(r.querySelector('.author')?.textContent||'').trim()})))`;
+
+async function collectViaAgentBrowser(
+  term: string,
+  symbol: string | undefined,
+  max: number,
+  onAction?: (text: string) => void,
+): Promise<AttentionPost[]> {
+  const ab = new AgentBrowser({ session: "mirofish-research", onAction });
+  const posts: AttentionPost[] = [];
+  type Row = { title: string; snippet: string; href: string };
+
+  // 1) Bing web — the meme + the ticker (en-US market so markup is stable).
+  for (const q of [`"${term}" meme`, symbol ? `${symbol} solana coin` : ""].filter(Boolean).slice(0, 2)) {
+    const url = `https://www.bing.com/search?q=${encodeURIComponent(q)}&mkt=en-US&setlang=en&count=20`;
+    if (!(await ab.open(url))) continue;
+    await ab.waitFor("li.b_algo");
+    const rows = (await ab.evalJson<Row[]>(BING_EXTRACT, `read bing results for ${q}`)) ?? [];
+    posts.push(...parseBingResults(rows).slice(0, max));
+  }
+
+  // 2) Bing News — recency + outside-crypto footprint.
+  {
+    const url = `https://www.bing.com/news/search?q=${encodeURIComponent(`${term} meme`)}&setlang=en`;
+    if (await ab.open(url)) {
+      await ab.waitFor(".news-card, article");
+      const rows = (await ab.evalJson<Row[]>(BING_NEWS_EXTRACT, `read bing news for ${term}`)) ?? [];
+      for (const r of rows) {
+        const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
+        if (text) posts.push({ text: text.slice(0, 240), platform: "news" });
+      }
+    }
+  }
+
+  // 3) old.reddit — community talk (best-effort; may be challenge-walled).
+  {
+    const url = `https://old.reddit.com/search?q=${encodeURIComponent(`${term} ${symbol ?? ""}`.trim())}&sort=new`;
+    if (await ab.open(url)) {
+      await ab.waitFor(".search-result-link");
+      const rows = (await ab.evalJson<Array<{ title: string; author: string }>>(OLD_REDDIT_EXTRACT, "read reddit results")) ?? [];
+      for (const r of rows.filter((x) => x.title).slice(0, 15)) {
+        posts.push({ text: r.title.slice(0, 240), author: r.author || undefined, platform: "reddit" });
+      }
+    }
+  }
+
+  onAction?.(`dive done — ${posts.length} posts collected`);
+  return posts;
 }
 
 async function ddgSearch(page: any, query: string, max: number): Promise<AttentionPost[]> {
@@ -201,15 +294,31 @@ export async function collectEvidence(
     platforms.add("wikipedia");
   }
 
-  // 3) Social via real browser (opt-in; Reddit/DDG block raw fetch).
+  // 3) Social/search via real browser (opt-in). Primary driver: agent-browser
+  //    (fast Rust CLI; streams to the dashboard RESEARCH CAM). Playwright stays
+  //    as the automatic fallback when the CLI is not installed.
   if (opts.useBrowser) {
     const max = opts.maxPerQuery ?? 8;
+    let collected = false;
+    if (opts.driver !== "playwright" && (await AgentBrowser.available())) {
+      try {
+        for (const p of await collectViaAgentBrowser(term, coin.symbol, max, opts.onAction)) {
+          posts.push(p);
+          platforms.add(p.platform);
+        }
+        collected = true;
+      } catch (e) {
+        log.warn(`attention: agent-browser dive failed (${(e as Error).message}) — trying playwright`);
+      }
+    }
     const spec = "playwright";
     let pw: any = null;
-    try {
-      pw = await import(spec);
-    } catch {
-      log.warn("attention: playwright not installed — News+Wiki only");
+    if (!collected) {
+      try {
+        pw = await import(spec);
+      } catch {
+        log.warn("attention: no browser driver available — News+Wiki only");
+      }
     }
     if (pw?.chromium) {
       let browser: any;

@@ -5,6 +5,8 @@ import { PumpPortalClient } from "./sources/pumpPortal.js";
 import { DexScanner } from "./sources/dexScanner.js";
 import { AttentionService, makeScorer } from "./attention/attentionService.js";
 import { collectEvidence } from "./attention/researchAgent.js";
+import { AgentBrowser } from "./browser/agentBrowser.js";
+import { BrowserCam } from "./browser/browserCam.js";
 import { ProviderRegistry } from "./research/providerRegistry.js";
 import { AthenaProvider } from "./research/athenaProvider.js";
 import { ManusMissionRunner } from "./research/manusMissionRunner.js";
@@ -23,6 +25,10 @@ import { log } from "./util/logger.js";
 // learning) onto the same Services container.
 async function main(): Promise<void> {
   const svc = createServices();
+
+  // RESEARCH CAM — the operator's live CCTV view of the research browser.
+  // Same agent-browser session the collector uses, so the stream shows real dives.
+  svc.cam = new BrowserCam(svc.hub, new AgentBrowser({ session: "mirofish-research" }));
 
   // Initialize the paper sim wallet if paper trading is enabled.
   if (svc.settings.get("paperEnabled")) {
@@ -60,7 +66,20 @@ async function main(): Promise<void> {
     // research.register(new ManusProvider(...));  // Hermes step 9 — preferred when keyed
     research.register(
       new AthenaProvider({
-        collect: (c) => collectEvidence(c, { useBrowser: svc.settings.get("attentionUseBrowser") }),
+        collect: async (c) => {
+          const useBrowser = svc.settings.get("attentionUseBrowser");
+          const label = `$${c.symbol ?? c.mint.slice(0, 6)}${c.name ? " · " + c.name : ""}`;
+          if (useBrowser) await svc.cam?.diveStart(label);
+          try {
+            return await collectEvidence(c, {
+              useBrowser,
+              driver: svc.settings.get("browserDriver"),
+              onAction: (t) => svc.cam?.note(t),
+            });
+          } finally {
+            if (useBrowser) svc.cam?.diveEnd();
+          }
+        },
         score: makeScorer(() => ({ baseUrl: svc.settings.get("ollamaBaseUrl"), model: svc.settings.get("attentionLlmModel") })),
       }),
     );
