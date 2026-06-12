@@ -135,6 +135,8 @@ export class PaperTrader {
       remainingTokenAmount: res.position?.tokenAmount ?? fill.tokenAmount,
       reason: decision.verdict,
       at: now,
+      positionId: res.position?.id,
+      flags: decision.flags?.length ? decision.flags.join(",") : undefined,
     });
     log.info(`paper: bought ${decision.symbol ?? decision.mint.slice(0, 8)} for ${sizeSol.toFixed(3)} SOL`);
     this.svc.hub.broadcast("paper", { action: "buy", mint: decision.mint });
@@ -193,12 +195,63 @@ export class PaperTrader {
         remainingTokenAmount: res.position?.tokenAmount ?? 0,
         reason: signal.reason,
         at: now,
+        positionId: fresh.id,
       });
+      // P0: the position just closed — append the round-trip to the DURABLE
+      // realized journal (survives /paper/reset; UNIQUE(position_id) dedupes).
+      if (res.marked === "closed" && res.position) {
+        try {
+          this.journalClose(res.position, signal.reason, sim.effPriceUsd, now);
+        } catch (err) {
+          log.warn(`paper: realized-journal write failed for #${res.position.id}: ${String(err)}`);
+        }
+      }
       log.info(`paper: ${signal.kind} ${fresh.symbol ?? fresh.mint.slice(0, 8)} (${realizedSol >= 0 ? "+" : ""}${realizedSol.toFixed(3)} SOL)`);
       this.svc.hub.broadcast("paper", { action: "sell", mint: fresh.mint });
     } finally {
       this.selling.delete(pos.id);
     }
+  }
+
+  /** P0: append the just-closed round-trip to the durable realized journal.
+   *  Numbers come from THIS position's fills (position_id, v15+). Positions whose
+   *  buys predate the column fall back to mint-matched fills inside the position's
+   *  lifetime and are marked approx=1 — honest about the reconstruction. */
+  private journalClose(pos: Position, exitReason: string | undefined, exitPriceUsd: number, now: number): void {
+    let fills = this.svc.paper.fillsForPosition(pos.id);
+    let approx = false;
+    if (!fills.some((f) => f.side === "buy")) {
+      approx = true;
+      fills = this.svc.paper
+        .fillsForMint(pos.mint, 200)
+        .filter((f) => f.at >= pos.entryAtMs - 60_000 && f.at <= now + 1_000 && (f.positionId == null || f.positionId === pos.id));
+    }
+    const buys = fills.filter((f) => f.side === "buy");
+    const sells = fills.filter((f) => f.side === "sell");
+    const solInvested = buys.reduce((s, f) => s + f.solAmount, 0);
+    const solReturned = sells.reduce((s, f) => s + f.solAmount, 0);
+    const realizedPnlSol = sells.reduce((s, f) => s + f.realizedPnlSol, 0);
+    this.svc.realized.record({
+      positionId: pos.id,
+      mint: pos.mint,
+      symbol: pos.symbol,
+      verdict: buys[0]?.reason,
+      flags: buys.find((f) => f.flags)?.flags,
+      openedAt: pos.entryAtMs,
+      closedAt: now,
+      holdMs: now - pos.entryAtMs,
+      entryPriceUsd: pos.entryPriceUsd,
+      exitPriceUsd,
+      peakMultiple: pos.entryPriceUsd > 0 ? pos.peakPriceUsd / pos.entryPriceUsd : undefined,
+      solInvested,
+      solReturned,
+      realizedPnlSol,
+      realizedPnlPct: solInvested > 0 ? (realizedPnlSol / solInvested) * 100 : undefined,
+      exitReason,
+      dd5mPct: this.svc.paper.minPnlPctWithin(pos.id, pos.entryAtMs),
+      approx,
+      createdAt: now,
+    });
   }
 
   private async price(mint: string): Promise<{ priceUsd?: number; liquidityUsd?: number } | undefined> {

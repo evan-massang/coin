@@ -3,6 +3,7 @@ import { openDb, type DB } from "../store/db.js";
 import { SettingsStore } from "../store/settingsStore.js";
 import { PaperRepo } from "../store/repositories/paperRepo.js";
 import { PositionsRepo } from "../store/repositories/positionsRepo.js";
+import { RealizedTradesRepo } from "../store/repositories/realizedTradesRepo.js";
 import { PaperTrader } from "./paperExecution.js";
 import type { Services } from "../services.js";
 import type { ExitSignal, Position } from "../types.js";
@@ -43,7 +44,7 @@ describe("PaperTrader.executeSell — token conservation under re-fired exits", 
     paper = new PaperRepo(db);
     paper.ensure(10);
     positions = new PositionsRepo(db, "paper_positions");
-    svc = { settings, paper, paperPositions: positions, hub: { broadcast: () => {} } } as unknown as Services;
+    svc = { settings, paper, paperPositions: positions, realized: new RealizedTradesRepo(db), hub: { broadcast: () => {} } } as unknown as Services;
     trader = new PaperTrader(svc);
     positions.open({
       mint: "M1",

@@ -5,6 +5,7 @@ import { TradesRepo } from "./store/repositories/tradesRepo.js";
 import { SignalsRepo } from "./store/repositories/signalsRepo.js";
 import { PositionsRepo } from "./store/repositories/positionsRepo.js";
 import { PaperRepo } from "./store/repositories/paperRepo.js";
+import { RealizedTradesRepo } from "./store/repositories/realizedTradesRepo.js";
 import { LearningRepo } from "./store/repositories/learningRepo.js";
 import { WalletsRepo } from "./store/repositories/walletsRepo.js";
 import { CreatorHistoryRepo } from "./store/repositories/creatorHistoryRepo.js";
@@ -62,6 +63,8 @@ export interface Services {
   positions: PositionsRepo;
   paperPositions: PositionsRepo;
   paper: PaperRepo;
+  /** P0: durable realized-trades journal — survives /paper/reset by design. */
+  realized: RealizedTradesRepo;
   learning: LearningRepo;
   wallets: WalletsRepo;
   creatorHistory: CreatorHistoryRepo;
@@ -94,6 +97,7 @@ export function createServices(db: DB = getDb()): Services {
   const positions = new PositionsRepo(db, "positions");
   const paperPositions = new PositionsRepo(db, "paper_positions");
   const paper = new PaperRepo(db);
+  const realized = new RealizedTradesRepo(db);
   const learning = new LearningRepo(db);
   const wallets = new WalletsRepo(db);
   const creatorHistory = new CreatorHistoryRepo(db);
@@ -131,6 +135,7 @@ export function createServices(db: DB = getDb()): Services {
     positions,
     paperPositions,
     paper,
+    realized,
     learning,
     wallets,
     creatorHistory,

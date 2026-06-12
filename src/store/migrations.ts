@@ -433,6 +433,60 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE missions ADD COLUMN kind TEXT NOT NULL DEFAULT 'research';
     `,
   },
+  {
+    version: 15,
+    up: /* sql */ `
+      -- P0 Measurement (IMPROVING_THE_AI.md): DURABLE realized-trades journal.
+      -- Append-only, one row per CLOSED paper position, written at close time.
+      -- /paper/reset must NEVER touch this table — it is the one PnL record that
+      -- survives resets (a reset wiped 253 positions mid-audit; realized PnL was
+      -- unverifiable across resets). UNIQUE(position_id) makes double-writes
+      -- structurally impossible (the exit engine re-fires exits every tick).
+      CREATE TABLE IF NOT EXISTS realized_trades (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        position_id      INTEGER NOT NULL UNIQUE,
+        mint             TEXT NOT NULL,
+        symbol           TEXT,
+        verdict          TEXT,
+        flags            TEXT,
+        opened_at        INTEGER NOT NULL,
+        closed_at        INTEGER NOT NULL,
+        hold_ms          INTEGER NOT NULL,
+        entry_price_usd  REAL,
+        exit_price_usd   REAL,
+        peak_multiple    REAL,
+        sol_invested     REAL NOT NULL,
+        sol_returned     REAL NOT NULL,
+        realized_pnl_sol REAL NOT NULL,
+        realized_pnl_pct REAL,
+        exit_reason      TEXT,
+        dd_5m_pct        REAL,
+        approx           INTEGER NOT NULL DEFAULT 0,
+        created_at       INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_realized_closed ON realized_trades(closed_at);
+
+      -- Reset audit log (also durable): when, what was wiped, where the export went.
+      CREATE TABLE IF NOT EXISTS paper_resets (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        at                   INTEGER NOT NULL,
+        export_path          TEXT,
+        balance_sol          REAL,
+        starting_balance_sol REAL,
+        equity_sol           REAL,
+        open_count           INTEGER,
+        closed_count         INTEGER,
+        fills_count          INTEGER
+      );
+
+      -- Fills now carry their position + the decision's provenance flags so the
+      -- close-time journal write can aggregate EXACTLY this position's fills
+      -- (mint alone is ambiguous across re-entries) and keep research:manus /
+      -- src:scan provenance attached to the realized outcome (the Rule-7 A/B).
+      ALTER TABLE paper_trades ADD COLUMN position_id INTEGER;
+      ALTER TABLE paper_trades ADD COLUMN flags TEXT;
+    `,
+  },
 ];
 
 /** Run all pending migrations against the open database. Idempotent. */

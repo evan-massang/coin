@@ -22,6 +22,11 @@ export interface PaperFill {
   remainingTokenAmount: number;
   reason?: string;
   at: number;
+  /** Owning paper position (v15) — exact close-time aggregation; mint alone is
+   *  ambiguous across re-entries. NULL on fills that predate the column. */
+  positionId?: number;
+  /** Decision provenance at buy time (e.g. "research:manus,src:scan"). */
+  flags?: string;
 }
 
 export class PaperRepo {
@@ -101,8 +106,8 @@ export class PaperRepo {
     const info = this.db
       .prepare(
         `INSERT INTO paper_trades
-           (mint, side, price_usd, sol_amount, token_amount, realized_pnl_sol, remaining_token_amount, reason, at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+           (mint, side, price_usd, sol_amount, token_amount, realized_pnl_sol, remaining_token_amount, reason, at, position_id, flags)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         f.mint,
@@ -114,8 +119,37 @@ export class PaperRepo {
         f.remainingTokenAmount,
         f.reason ?? null,
         f.at,
+        f.positionId ?? null,
+        f.flags ?? null,
       );
     return Number(info.lastInsertRowid);
+  }
+
+  /** Every fill belonging to one position (v15+), oldest first. */
+  fillsForPosition(positionId: number): PaperFill[] {
+    const rows = this.db
+      .prepare("SELECT * FROM paper_trades WHERE position_id=? ORDER BY at ASC")
+      .all(positionId) as Record<string, unknown>[];
+    return rows.map(rowToFill);
+  }
+
+  /** Worst recorded PnL% within the first `windowMs` after entry (P0: dd@5m). */
+  minPnlPctWithin(positionId: number, entryAtMs: number, windowMs = 5 * 60_000): number | undefined {
+    const r = this.db
+      .prepare("SELECT MIN(pnl_pct) m FROM paper_price_samples WHERE position_id=? AND at <= ?")
+      .get(positionId, entryAtMs + windowMs) as { m: number | null };
+    return r.m ?? undefined;
+  }
+
+  fillsCount(): number {
+    const r = this.db.prepare("SELECT COUNT(*) n FROM paper_trades").get() as { n: number };
+    return r.n;
+  }
+
+  /** Full fills dump (reset auto-export). */
+  allFills(): PaperFill[] {
+    const rows = this.db.prepare("SELECT * FROM paper_trades ORDER BY at ASC").all() as Record<string, unknown>[];
+    return rows.map(rowToFill);
   }
 
   fills(limit = 200): PaperFill[] {
@@ -154,5 +188,7 @@ function rowToFill(r: Record<string, unknown>): PaperFill {
     remainingTokenAmount: r.remaining_token_amount as number,
     reason: (r.reason as string) ?? undefined,
     at: r.at as number,
+    positionId: (r.position_id as number) ?? undefined,
+    flags: (r.flags as string) ?? undefined,
   };
 }

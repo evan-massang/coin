@@ -522,14 +522,46 @@ async function toggleWhy(tr, mint) {
   </td>`;
 }
 function paperCloseRow(p) {
-  const realized = p.realizedPnlUsd ?? 0, win = realized > 0;
+  // P0: prefer the durable ledger's SOL number; fall back to the position's USD.
+  const hasLedger = p.realizedPnlSol != null;
+  const win = hasLedger ? p.realizedPnlSol > 0 : (p.realizedPnlUsd ?? 0) > 0;
+  const pnlCell = hasLedger
+    ? `${win ? "+" : ""}${p.realizedPnlSol.toFixed(3)} SOL`
+    : `${win ? "+" : ""}$${(p.realizedPnlUsd ?? 0).toFixed(2)}`;
   const peak = p.entryPriceUsd > 0 && p.peakPriceUsd ? p.peakPriceUsd / p.entryPriceUsd : 1;
+  const dd = p.dd5mPct != null ? `${Math.round(p.dd5mPct)}%` : "—";
   return `<tr>
     <td><b>$${esc(p.symbol || p.mint.slice(0, 5))}</b></td>
     <td><span class="${win ? "green" : "red"}">${win ? "WIN" : "LOSS"}</span></td>
-    <td class="${win ? "green" : "red"}">${win ? "+" : ""}$${realized.toFixed(2)}</td>
+    <td class="${win ? "green" : "red"}">${pnlCell}</td>
     <td class="muted">${peak.toFixed(2)}x</td>
+    <td class="${p.dd5mPct != null && p.dd5mPct < -20 ? "red" : "muted"}">${dd}</td>
+    <td class="muted small" title="${esc(p.exitReason || "")}">${esc((p.exitReason || "—").slice(0, 38))}</td>
   </tr>`;
+}
+// P0: realized equity curve from the durable ledger (cumulative SOL per close).
+function drawEquity(curve) {
+  const cv = $("#pw-equity");
+  if (!cv) return;
+  const { ctx, w, h } = fit(cv, 64);
+  if (!curve || curve.length < 2) {
+    ctx.fillStyle = COL.muted; ctx.font = "11px monospace";
+    ctx.fillText(curve && curve.length === 1 ? "1 closed trade journaled — curve appears at 2+" : "no journaled closes yet (ledger starts now, survives resets)", 6, h / 2 + 4);
+    return;
+  }
+  const t0 = curve[0].t, t1 = curve[curve.length - 1].t || t0 + 1;
+  let lo = 0, hi = 0;
+  for (const p of curve) { lo = Math.min(lo, p.cumSol); hi = Math.max(hi, p.cumSol); }
+  if (hi - lo < 1e-9) hi = lo + 1;
+  const X = (t) => 4 + ((t - t0) / (t1 - t0 || 1)) * (w - 8);
+  const Y = (v) => h - 6 - ((v - lo) / (hi - lo)) * (h - 12);
+  ctx.strokeStyle = COL.line; ctx.beginPath(); ctx.moveTo(4, Y(0)); ctx.lineTo(w - 4, Y(0)); ctx.stroke();
+  const last = curve[curve.length - 1].cumSol;
+  ctx.strokeStyle = last >= 0 ? COL.green : COL.red; ctx.lineWidth = 1.5; ctx.beginPath();
+  curve.forEach((p, i) => (i ? ctx.lineTo(X(p.t), Y(p.cumSol)) : ctx.moveTo(X(p.t), Y(p.cumSol))));
+  ctx.stroke(); ctx.lineWidth = 1;
+  ctx.fillStyle = last >= 0 ? COL.green : COL.red; ctx.font = "11px monospace";
+  ctx.fillText(`${last >= 0 ? "+" : ""}${last.toFixed(3)} SOL realized · ${curve.length} closes`, 6, 12);
 }
 async function renderPaper() {
   const p = await api("/paper").catch(() => null);
@@ -555,7 +587,13 @@ async function renderPaper() {
   $("#pw-bal").innerHTML = `${equity.toFixed(2)} <span class="muted small">SOL equity / ${start} start</span><br><span class="muted small">${bal.toFixed(2)} cash + ${openVal.toFixed(2)} in ${st.openCount ?? 0} open</span>`;
   const pnl = st.totalPnlSol ?? 0;
   const rz = st.realizedPnlSol ?? 0, ur = st.unrealizedPnlSol ?? 0;
-  $("#pw-pnl").innerHTML = `<span class="${pnl >= 0 ? "green" : "red"}">${pnl >= 0 ? "+" : ""}${pnl.toFixed(3)}</span> <span class="muted small">SOL total</span><br><span class="muted small">realized ${rz >= 0 ? "+" : ""}${rz.toFixed(2)} · unreal ${ur >= 0 ? "+" : ""}${ur.toFixed(2)}</span>`;
+  // P0: surface the durable ledger next to the cash-derived number + drift alarm.
+  const lg = p.ledger || {};
+  const drift = Math.abs(lg.reconcileDeltaSol ?? 0);
+  const ledgerLine = lg.trades != null
+    ? `<br><span class="${drift > 0.05 ? "red" : "muted"} small">ledger ${(lg.realizedPnlSol ?? 0) >= 0 ? "+" : ""}${(lg.realizedPnlSol ?? 0).toFixed(2)} over ${lg.trades} closes${drift > 0.05 ? ` · ⚠ drift ${lg.reconcileDeltaSol.toFixed(2)}` : ""}</span>`
+    : "";
+  $("#pw-pnl").innerHTML = `<span class="${pnl >= 0 ? "green" : "red"}">${pnl >= 0 ? "+" : ""}${pnl.toFixed(3)}</span> <span class="muted small">SOL total</span><br><span class="muted small">realized ${rz >= 0 ? "+" : ""}${rz.toFixed(2)} · unreal ${ur >= 0 ? "+" : ""}${ur.toFixed(2)}</span>${ledgerLine}`;
   $("#pw-win").textContent = `${Math.round((st.winRate ?? 0) * 100)}%`;
   $("#pw-open").textContent = st.openCount ?? (p.open || []).length;
   $("#pw-closed").textContent = st.closedCount ?? (p.closed || []).length;
@@ -573,7 +611,9 @@ async function renderPaper() {
   const closed = (p.closed || []).slice(-10).reverse();
   $("#pw-closes").innerHTML = closed.length
     ? closed.map(paperCloseRow).join("")
-    : `<tr><td colspan="4" class="muted small">no closed trades yet</td></tr>`;
+    : `<tr><td colspan="6" class="muted small">no closed trades yet</td></tr>`;
+  const eq = await api("/paper/equity").catch(() => null);
+  drawEquity(eq && eq.curve);
 }
 
 // ── reasoning feed (live "why it buys / sells / avoids") ──
@@ -676,7 +716,7 @@ async function openConfig() {
   }).join("") + `<div class="cfgrow"><button class="btn" type="button" id="cfg-save">Save</button><button class="btn ghost" type="button" id="cfg-test">Test wallet</button><button class="btn danger" type="button" id="cfg-reset">Reset paper</button><span class="muted" id="cfg-out"></span></div>`;
   $("#cfg-save").onclick = saveConfig;
   $("#cfg-test").onclick = async () => { $("#cfg-out").textContent = "testing…"; const r = await api("/settings/test-connection", { method: "POST", body: { address: form.walletAddress.value } }); $("#cfg-out").textContent = r.ok ? `OK · ${r.balanceSol?.toFixed(3)} SOL` : `fail: ${r.error}`; };
-  $("#cfg-reset").onclick = async () => { await api("/paper/reset", { method: "POST" }); $("#cfg-out").textContent = "paper reset"; loadAll(); };
+  $("#cfg-reset").onclick = async () => { if (!confirm("Reset the paper wallet? Positions + fills are wiped (auto-exported first; the realized ledger is kept).")) return; const r = await api("/paper/reset", { method: "POST", body: { confirm: true } }); $("#cfg-out").textContent = r && r.ok ? `paper reset · exported ${r.exportPath || "(export failed)"}` : `reset refused: ${(r && r.error) || "?"}`; loadAll(); };
   $("#config").classList.add("open");
 }
 async function saveConfig() {
@@ -690,7 +730,7 @@ $("#open-config").onclick = openConfig;
 $("#close-config").onclick = () => $("#config").classList.remove("open");
 $("#open-room").onclick = openCouncilRoom;
 $("#close-room").onclick = () => $("#room").classList.remove("open");
-$("#pw-reset").onclick = async () => { if (!confirm("Reset the paper wallet to its starting balance? This clears all simulated positions.")) return; await api("/paper/reset", { method: "POST" }); renderPaper(); };
+$("#pw-reset").onclick = async () => { if (!confirm("Reset the paper wallet to its starting balance? Positions + fills are wiped (auto-exported first; the durable realized ledger is kept).")) return; await api("/paper/reset", { method: "POST", body: { confirm: true } }); renderPaper(); };
 $("#rz-filters").onclick = (e) => {
   const f = e.target.closest(".rz-f"); if (!f) return;
   RZ.kind = f.getAttribute("data-k");

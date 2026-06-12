@@ -1,8 +1,11 @@
 import { Router } from "express";
+import fs from "node:fs";
+import path from "node:path";
 import type { Services } from "../services.js";
 import type { Position } from "../types.js";
 import { buildLinks } from "../alerts/templates.js";
 import { computePaperStats } from "../paper/paperPnL.js";
+import { config } from "../config.js";
 
 // Paper Wallet tab API (Mode 3). Simulation only — these endpoints never touch
 // a key, never sign, never go on-chain.
@@ -17,15 +20,93 @@ export function paperRoutes(svc: Services): Router {
     const wallet = svc.paper.get();
     const open = svc.paperPositions.byStatus(true);
     const closed = svc.paperPositions.byStatus(false);
+    // P0: closed rows carry their durable-journal record (exit reason, dd@5m,
+    // realized SOL) so the UI shows WHY each trade ended, not just the PnL.
+    const journal = svc.realized.forPositions(closed.map((p) => p.id));
+    const stats = computePaperStats(wallet, open, closed, svc.paper.realizedPnlSol());
+    const sinceReset = svc.realized.lastResetAt() ?? 0;
+    const ledger = svc.realized.totals(sinceReset);
     res.json({
       enabled: s.paperEnabled,
       startingBalanceSol: s.paperStartingBalanceSol,
       wallet,
       open: open.map(withLinks),
-      closed: closed.map(withLinks),
+      closed: closed.map((p) => {
+        const j = journal.get(p.id);
+        return {
+          ...withLinks(p),
+          exitReason: j?.exitReason,
+          dd5mPct: j?.dd5mPct,
+          realizedPnlSol: j?.realizedPnlSol,
+          holdMs: j?.holdMs,
+        };
+      }),
       fills: svc.paper.fills(100),
-      stats: computePaperStats(svc.paper.get(), open, closed, svc.paper.realizedPnlSol()),
+      stats,
+      // One PnL source of truth (P0): the durable ledger for the CURRENT wallet
+      // generation, plus the reconciliation delta vs the cash-derived stats.
+      // statsRealized ties to real cash by construction; ledgerRealized is the
+      // sum of journaled round-trips. They should agree within fill rounding.
+      ledger: {
+        ...ledger,
+        sinceReset,
+        allTime: svc.realized.totals(0),
+        reconcileDeltaSol: ledger.realizedPnlSol - stats.realizedPnlSol,
+      },
     });
+  });
+
+  // P0: realized equity curve — cumulative realized SOL per closed trade, from
+  // the durable journal (survives resets; pass ?all=1 for the full history).
+  r.get("/paper/equity", (req, res) => {
+    const all = req.query.all === "1";
+    const since = all ? 0 : svc.realized.lastResetAt() ?? 0;
+    res.json({ since, curve: svc.realized.equityCurve(since) });
+  });
+
+  // Reset the sim wallet to the configured starting balance.
+  // P0 guard: requires explicit confirm + auto-exports the full paper state
+  // first (a reset destroyed 253 positions mid-audit; never again silently).
+  r.post("/paper/reset", (req, res) => {
+    const confirmed = Boolean((req.body as { confirm?: boolean } | undefined)?.confirm);
+    if (!confirmed) {
+      res.status(400).json({
+        ok: false,
+        error: "reset requires {\"confirm\":true} — it wipes the sim wallet, positions and fills (the durable realized journal is kept)",
+      });
+      return;
+    }
+    const now = Date.now();
+    const wallet = svc.paper.get();
+    const open = svc.paperPositions.byStatus(true);
+    const closed = svc.paperPositions.byStatus(false);
+    const stats = computePaperStats(wallet, open, closed, svc.paper.realizedPnlSol());
+    let exportPath: string | undefined;
+    try {
+      const dir = path.join(config.dataDir, "exports");
+      fs.mkdirSync(dir, { recursive: true });
+      exportPath = path.join(dir, `paper-reset-${new Date(now).toISOString().replace(/[:.]/g, "-")}.json`);
+      fs.writeFileSync(
+        exportPath,
+        JSON.stringify({ at: now, wallet, stats, open, closed, fills: svc.paper.allFills() }, null, 2),
+      );
+    } catch {
+      exportPath = undefined; // export failure must not block the reset; it IS logged below
+    }
+    svc.realized.recordReset({
+      at: now,
+      exportPath,
+      balanceSol: wallet?.balanceSol,
+      startingBalanceSol: wallet?.startingBalanceSol,
+      equitySol: stats.equitySol,
+      openCount: open.length,
+      closedCount: closed.length,
+      fillsCount: svc.paper.fillsCount(),
+    });
+    const starting = svc.settings.get("paperStartingBalanceSol");
+    svc.paper.reset(starting);
+    svc.hub.broadcast("paper", { reset: true });
+    res.json({ ok: true, wallet: svc.paper.get(), exportPath });
   });
 
   // Profit x Time series: per owned paper position, the PnL% trajectory from the
@@ -57,14 +138,6 @@ export function paperRoutes(svc: Services): Router {
         };
       }),
     });
-  });
-
-  // Reset the sim wallet to the configured starting balance.
-  r.post("/paper/reset", (_req, res) => {
-    const starting = svc.settings.get("paperStartingBalanceSol");
-    svc.paper.reset(starting);
-    svc.hub.broadcast("paper", { reset: true });
-    res.json({ ok: true, wallet: svc.paper.get() });
   });
 
   return r;
