@@ -1,122 +1,158 @@
 import WebSocket from "ws";
-import type { AgentBrowser } from "./agentBrowser.js";
+import { AgentBrowser } from "./agentBrowser.js";
 import { log } from "../util/logger.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RESEARCH CAM — the operator's CCTV view of the research browser. Connects to
-// agent-browser's runtime WebSocket stream (base64 JPEG viewport frames),
-// throttles to ≤2fps, and re-broadcasts on the dashboard hub together with the
-// action ticker ("open bing…", "wait for results", …). Pure observation: it
-// renders what the read-only research browser is doing; it sends NO input.
+// RESEARCH CAM — the operator's multi-pane CCTV view of the research browser.
+// A dive now fans out across several agent-browser SESSIONS at once (Google, X,
+// Reddit, Brave, DuckDuckGo, Bing — see researchAgent.RESEARCH_LANES). The cam
+// attaches to EACH lane's runtime WebSocket stream (base64 JPEG frames),
+// throttles per lane, and re-broadcasts every frame TAGGED with its lane so the
+// dashboard shows all lanes searching simultaneously. Pure observation: it sends
+// no input, it only renders what the read-only research browser is doing.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface CamAction {
   at: number;
+  lane: string;
   text: string;
+}
+
+interface LaneState {
+  id: string;
+  label: string;
+  session: string;
+  ab: AgentBrowser;
+  ws?: WebSocket;
+  status: "live" | "done";
+  lastFrameAt: number;
+  lastSentAt: number;
+}
+
+export interface CamPaneState {
+  id: string;
+  label: string;
+  status: "live" | "done";
+  lastFrameAt?: number;
 }
 
 export interface CamState {
   status: "idle" | "live";
-  label?: string; // what we're researching (e.g. "$WIF dogwifhat")
+  coinLabel?: string;
+  lanes: CamPaneState[];
   actions: CamAction[];
-  lastFrameAt?: number;
 }
 
-const FRAME_MIN_GAP_MS = 600; // ≤ ~1.7fps to the dashboard
-const IDLE_DISCONNECT_MS = 30_000;
+const FRAME_MIN_GAP_MS = 650; // per-lane throttle (~1.5fps each)
+const LANE_LINGER_MS = 8_000; // keep a finished lane's last frame up briefly
 
 export class BrowserCam {
-  private ws?: WebSocket;
+  private readonly lanes = new Map<string, LaneState>();
   private status: "idle" | "live" = "idle";
-  private label?: string;
+  private coinLabel?: string;
   private readonly actions: CamAction[] = [];
-  private lastFrameAt = 0;
-  private lastFrameSentAt = 0;
-  private idleTimer?: NodeJS.Timeout;
 
-  constructor(
-    private readonly hub: { broadcast: (type: string, data: unknown) => void },
-    private readonly ab: AgentBrowser,
-  ) {}
+  constructor(private readonly hub: { broadcast: (type: string, data: unknown) => void }) {}
 
-  /** Current state for first paint (GET /api/browsercam). */
+  /** Snapshot for first paint (GET /api/browsercam). */
   state(): CamState {
     return {
       status: this.status,
-      label: this.label,
-      actions: this.actions.slice(-14),
-      lastFrameAt: this.lastFrameAt || undefined,
+      coinLabel: this.coinLabel,
+      lanes: [...this.lanes.values()].map((l) => ({
+        id: l.id,
+        label: l.label,
+        status: l.status,
+        lastFrameAt: l.lastFrameAt || undefined,
+      })),
+      actions: this.actions.slice(-18),
     };
   }
 
-  /** Narrate one browser action (also called by the AgentBrowser onAction hook). */
-  note(text: string): void {
-    const a = { at: Date.now(), text };
+  /** A dive is starting — go LIVE (individual lanes attach via laneStart). */
+  diveStart(coinLabel: string): void {
+    this.coinLabel = coinLabel;
+    this.status = "live";
+    this.hub.broadcast("browsercam", { kind: "dive", status: "live", coinLabel });
+  }
+
+  /** One lane (its own session/stream) just went live — attach + show its pane. */
+  async laneStart(laneId: string, label: string, session: string): Promise<void> {
+    let lane = this.lanes.get(laneId);
+    if (!lane) {
+      lane = { id: laneId, label, session, ab: new AgentBrowser({ session }), status: "live", lastFrameAt: 0, lastSentAt: 0 };
+      this.lanes.set(laneId, lane);
+    }
+    lane.label = label;
+    lane.status = "live";
+    this.hub.broadcast("browsercam", { kind: "lane", id: laneId, label, status: "live" });
+    await this.connect(lane).catch((e) => log.warn(`research cam: lane ${laneId} stream failed: ${(e as Error).message}`));
+  }
+
+  /** Narrate one lane action (RESEARCH CAM ticker; laneId "all" = whole dive). */
+  laneAction(laneId: string, text: string): void {
+    const a: CamAction = { at: Date.now(), lane: laneId, text };
     this.actions.push(a);
-    if (this.actions.length > 60) this.actions.shift();
+    if (this.actions.length > 80) this.actions.shift();
     this.hub.broadcast("browsercam", { kind: "action", ...a });
   }
 
-  /** A research dive is starting — go LIVE and attach to the frame stream. */
-  async diveStart(label: string): Promise<void> {
-    this.label = label;
-    this.status = "live";
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.hub.broadcast("browsercam", { kind: "status", status: "live", label });
-    await this.connect().catch((e) => log.warn(`research cam: stream connect failed: ${(e as Error).message}`));
+  /** A lane finished — mark done, drop its stream after a short linger. */
+  laneEnd(laneId: string): void {
+    const lane = this.lanes.get(laneId);
+    if (!lane) return;
+    lane.status = "done";
+    this.hub.broadcast("browsercam", { kind: "lane", id: laneId, label: lane.label, status: "done" });
+    setTimeout(() => this.disconnect(lane), LANE_LINGER_MS);
   }
 
-  /** Dive finished — back to NO SIGNAL after a short linger. */
+  /** The whole dive finished — back to idle once lanes linger out. */
   diveEnd(): void {
     this.status = "idle";
-    this.hub.broadcast("browsercam", { kind: "status", status: "idle", label: this.label });
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => this.disconnect(), IDLE_DISCONNECT_MS);
+    this.hub.broadcast("browsercam", { kind: "dive", status: "idle", coinLabel: this.coinLabel });
   }
 
-  private async connect(): Promise<void> {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
-    const port = await this.ab.streamPort();
+  private async connect(lane: LaneState): Promise<void> {
+    if (lane.ws && lane.ws.readyState === WebSocket.OPEN) return;
+    const port = await lane.ab.streamPort();
     if (!port) {
-      this.note("⚠ stream unavailable (agent-browser not running?)");
+      this.laneAction(lane.id, "⚠ stream unavailable");
       return;
     }
-    this.disconnect();
+    this.disconnect(lane);
     const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-    this.ws = ws;
-    ws.on("message", (buf) => this.onMessage(buf));
-    ws.on("error", (e) => log.warn(`research cam ws error: ${e.message}`));
+    lane.ws = ws;
+    ws.on("message", (buf) => this.onFrame(lane, buf));
+    ws.on("error", (e) => log.warn(`research cam ws (${lane.id}) error: ${e.message}`));
     ws.on("close", () => {
-      if (this.ws === ws) this.ws = undefined;
+      if (lane.ws === ws) lane.ws = undefined;
     });
   }
 
-  private disconnect(): void {
+  private disconnect(lane: LaneState): void {
     try {
-      this.ws?.close();
+      lane.ws?.close();
     } catch {
       /* ignore */
     }
-    this.ws = undefined;
+    lane.ws = undefined;
   }
 
-  private onMessage(buf: WebSocket.RawData): void {
+  private onFrame(lane: LaneState, buf: WebSocket.RawData): void {
     let m: Record<string, unknown>;
     try {
       m = JSON.parse(buf.toString()) as Record<string, unknown>;
     } catch {
       return;
     }
-    // Frame messages carry a large base64 JPEG payload (field name varies by
-    // version — duck-type on "long base64 string").
     const b64 = [m.data, m.frame, (m.payload as Record<string, unknown> | undefined)?.data].find(
       (v): v is string => typeof v === "string" && v.length > 1_000,
     );
     if (!b64) return;
     const now = Date.now();
-    this.lastFrameAt = now;
-    if (now - this.lastFrameSentAt < FRAME_MIN_GAP_MS) return; // throttle
-    this.lastFrameSentAt = now;
-    this.hub.broadcast("browsercam", { kind: "frame", jpeg: b64, at: now });
+    lane.lastFrameAt = now;
+    if (now - lane.lastSentAt < FRAME_MIN_GAP_MS) return; // per-lane throttle
+    lane.lastSentAt = now;
+    this.hub.broadcast("browsercam", { kind: "frame", lane: lane.id, label: lane.label, jpeg: b64, at: now });
   }
 }

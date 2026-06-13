@@ -681,51 +681,74 @@ function connectWs() {
   };
 }
 
-// ── RESEARCH CAM — CCTV view of the read-only research browser ──
-const CAM = { live: false, lastFrameAt: 0 };
+// ── RESEARCH CAM — multi-pane CCTV (one pane per concurrent search lane) ──
+const CAM = { lanes: new Set() };
+function camSetStatus(live) {
+  $("#cam-status").innerHTML = live ? `<span class="green">● LIVE</span>` : `<span class="muted">NO SIGNAL</span>`;
+}
+function camPane(laneId, label) {
+  let pane = document.querySelector(`#cam-grid .cam-pane[data-lane="${laneId}"]`);
+  if (!pane) {
+    pane = document.createElement("div");
+    pane.className = "cam-pane";
+    pane.setAttribute("data-lane", laneId);
+    pane.innerHTML = `<img alt="" /><div class="cam-pane-bar"><span class="cam-rec">●</span><span class="cam-pane-label">${esc(label || laneId)}</span><span class="cam-pane-ts"></span></div>`;
+    $("#cam-grid").appendChild(pane);
+    CAM.lanes.add(laneId);
+    $("#cam-nosignal").style.display = "none";
+  }
+  if (label) pane.querySelector(".cam-pane-label").textContent = label;
+  return pane;
+}
 function camMessage(d) {
   if (!d) return;
-  if (d.kind === "status") {
-    CAM.live = d.status === "live";
-    $("#cam-screen").classList.toggle("cam-live", CAM.live && Date.now() - CAM.lastFrameAt < 60_000);
-    $("#cam-status").innerHTML = CAM.live ? `<span class="green">● LIVE</span>` : `<span class="muted">NO SIGNAL</span>`;
-    if (d.label) $("#cam-label").textContent = d.label;
+  if (d.kind === "dive") {
+    camSetStatus(d.status === "live");
+    $("#cam-coin").textContent = d.coinLabel || "";
+    if (d.status === "idle") setTimeout(camMaybeClear, 10_000);
+  } else if (d.kind === "lane") {
+    const pane = camPane(d.id, d.label);
+    pane.classList.toggle("done", d.status === "done");
   } else if (d.kind === "frame") {
-    CAM.lastFrameAt = d.at || Date.now();
-    const img = $("#cam-frame");
-    img.src = `data:image/jpeg;base64,${d.jpeg}`;
-    $("#cam-screen").classList.add("cam-live");
-    $("#cam-ts").textContent = new Date(CAM.lastFrameAt).toISOString().slice(11, 19) + " UTC";
-    if (!CAM.live) { CAM.live = true; $("#cam-status").innerHTML = `<span class="green">● LIVE</span>`; }
+    const pane = camPane(d.lane, d.label);
+    pane.classList.add("cam-live");
+    pane.querySelector("img").src = `data:image/jpeg;base64,${d.jpeg}`;
+    pane.querySelector(".cam-pane-ts").textContent = new Date(d.at || Date.now()).toISOString().slice(11, 19);
+    camSetStatus(true);
   } else if (d.kind === "action") {
     camAction(d);
   }
+}
+function camMaybeClear() {
+  // If no pane has refreshed in a while, the dive is over — reset to NO SIGNAL.
+  const panes = [...document.querySelectorAll("#cam-grid .cam-pane")];
+  const stale = panes.every((p) => p.classList.contains("done"));
+  if (stale) { $("#cam-grid").innerHTML = ""; CAM.lanes.clear(); $("#cam-nosignal").style.display = ""; camSetStatus(false); $("#cam-coin").textContent = ""; }
 }
 function camAction(a) {
   const box = $("#cam-ticker");
   if (!box) return;
   if (box.firstElementChild && box.firstElementChild.classList.contains("muted")) box.innerHTML = "";
+  const tag = a.lane && a.lane !== "all" ? `<span class="cam-act-lane">${esc(a.lane)}</span>` : "";
   const el = document.createElement("div");
   el.className = "cam-act";
-  el.innerHTML = `<span class="t">${new Date(a.at || Date.now()).toISOString().slice(11, 19)}</span>${esc(a.text)}`;
+  el.innerHTML = `<span class="t">${new Date(a.at || Date.now()).toISOString().slice(11, 19)}</span>${tag}${esc(a.text)}`;
   box.prepend(el);
-  while (box.children.length > 14) box.lastElementChild.remove();
+  while (box.children.length > 18) box.lastElementChild.remove();
 }
 async function loadCam() {
   const c = await api("/browsercam").catch(() => null);
   if (!c) return;
-  CAM.live = c.status === "live";
-  $("#cam-status").innerHTML = CAM.live ? `<span class="green">● LIVE</span>` : `<span class="muted">NO SIGNAL</span>`;
-  if (c.label) $("#cam-label").textContent = c.label;
+  camSetStatus(c.status === "live");
+  $("#cam-coin").textContent = c.coinLabel || "";
+  for (const l of c.lanes || []) camPane(l.id, l.label).classList.toggle("done", l.status === "done");
   for (const a of c.actions || []) camAction(a);
-  if (!c.browserEnabled) camAction({ at: Date.now(), text: "⚠ browser dives are OFF — enable 'research browser dives' in CONFIG" });
+  if (!c.browserEnabled) camAction({ at: Date.now(), lane: "all", text: "⚠ browser dives are OFF — enable 'research browser dives' in CONFIG" });
 }
 $("#cam-dive").onclick = async () => {
   const r = await api("/browsercam/dive", { method: "POST", body: {} }).catch(() => null);
   if (!r || !r.ok) { $("#cam-status").innerHTML = `<span class="red">${esc((r && r.error) || "dive failed")}</span>`; return; }
-  // Don't touch #cam-status here — the ws "status: live" message owns it (a
-  // local "starting…" would race and overwrite ● LIVE mid-dive).
-  camAction({ at: Date.now(), text: `dive queued for $${r.symbol || (r.mint || "").slice(0, 6)}` });
+  camAction({ at: Date.now(), lane: "all", text: `dive queued for $${r.symbol || (r.mint || "").slice(0, 6)}` });
 };
 loadCam();
 

@@ -26,13 +26,12 @@ import { log } from "./util/logger.js";
 async function main(): Promise<void> {
   const svc = createServices();
 
-  // RESEARCH CAM — the operator's live CCTV view of the research browser.
-  // Same agent-browser session the collector uses, so the stream shows real dives.
-  const researchBrowser = new AgentBrowser({ session: "mirofish-research" });
-  // Clear any pre-stealth daemon so the next launch picks up the anti-detection
-  // env (UA + dropped AutomationControlled flag) — see agentBrowser.ts STEALTH.
-  void researchBrowser.reset();
-  svc.cam = new BrowserCam(svc.hub, researchBrowser);
+  // RESEARCH CAM — the operator's multi-pane CCTV view. Each research lane runs
+  // in its own agent-browser session and streams to its own pane. Clear any
+  // leftover daemons so every lane relaunches fresh with the stealth env (UA +
+  // dropped AutomationControlled flag) — see agentBrowser.ts STEALTH.
+  void AgentBrowser.resetAll();
+  svc.cam = new BrowserCam(svc.hub);
 
   // Initialize the paper sim wallet if paper trading is enabled.
   if (svc.settings.get("paperEnabled")) {
@@ -73,15 +72,22 @@ async function main(): Promise<void> {
         collect: async (c) => {
           const useBrowser = svc.settings.get("attentionUseBrowser");
           const label = `$${c.symbol ?? c.mint.slice(0, 6)}${c.name ? " · " + c.name : ""}`;
-          if (useBrowser) await svc.cam?.diveStart(label);
+          const cam = svc.cam;
+          if (useBrowser) cam?.diveStart(label);
           try {
             return await collectEvidence(c, {
               useBrowser,
               driver: svc.settings.get("browserDriver"),
-              onAction: (t) => svc.cam?.note(t),
+              cam: cam
+                ? {
+                    laneStart: (id, lbl, session) => cam.laneStart(id, lbl, session),
+                    laneAction: (id, t) => cam.laneAction(id, t),
+                    laneEnd: (id) => cam.laneEnd(id),
+                  }
+                : undefined,
             });
           } finally {
-            if (useBrowser) svc.cam?.diveEnd();
+            if (useBrowser) cam?.diveEnd();
           }
         },
         score: makeScorer(() => ({ baseUrl: svc.settings.get("ollamaBaseUrl"), model: svc.settings.get("attentionLlmModel") })),

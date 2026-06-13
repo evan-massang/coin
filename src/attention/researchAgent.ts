@@ -147,8 +147,8 @@ export interface ResearchOptions {
    *  the legacy Playwright path (also the automatic fallback when the
    *  agent-browser CLI is not installed). */
   driver?: "agent-browser" | "playwright";
-  /** Narrator hook — every browser step is reported here (RESEARCH CAM ticker). */
-  onAction?: (text: string) => void;
+  /** RESEARCH CAM lane hooks — wired so the multi-pane grid shows each lane live. */
+  cam?: CamLaneHooks;
 }
 
 async function fetchGoogleNews(query: string): Promise<AttentionPost[]> {
@@ -185,75 +185,197 @@ const BING_NEWS_EXTRACT = `JSON.stringify([...document.querySelectorAll('.news-c
 const OLD_REDDIT_EXTRACT = `JSON.stringify([...document.querySelectorAll('.search-result-link')].slice(0,15).map(r=>({title:(r.querySelector('.search-title')?.textContent||'').trim(),author:(r.querySelector('.author')?.textContent||'').trim()})))`;
 const BRAVE_EXTRACT = `JSON.stringify([...document.querySelectorAll('.snippet[data-type=web], .snippet')].slice(0,12).map(r=>({title:(r.querySelector('.title, .snippet-title')?.textContent||'').trim(),href:r.querySelector('a')?.href||'',snippet:(r.querySelector('.snippet-description, .snippet-content p, p')?.textContent||'').trim().slice(0,160)})))`;
 const DDG_EXTRACT = `JSON.stringify([...document.querySelectorAll('.result')].slice(0,12).map(r=>({title:(r.querySelector('.result__a')?.textContent||'').trim(),href:r.querySelector('.result__a')?.getAttribute('href')||'',snippet:(r.querySelector('.result__snippet')?.textContent||'').trim().slice(0,160)})))`;
+const GOOGLE_EXTRACT = `JSON.stringify([...document.querySelectorAll('div.tF2Cxc, div.g, div.MjjYud')].slice(0,12).map(r=>({title:(r.querySelector('h3')?.textContent||'').trim(),href:r.querySelector('a')?.href||'',snippet:(r.querySelector('.VwiC3b, .aCOpRe, [data-sncf] span')?.textContent||'').trim().slice(0,160)})))`;
+const X_EXTRACT = `JSON.stringify([...document.querySelectorAll('article')].slice(0,12).map(a=>({title:(a.querySelector('[data-testid=tweetText]')?.textContent||'').trim().slice(0,200),author:(a.querySelector('[data-testid=User-Name]')?.textContent||'').trim().slice(0,40)})))`;
+
+// ── Research LANES — one agent-browser SESSION per source, run CONCURRENTLY ──
+// Each lane is an isolated Chrome instance + WebSocket stream searching ONE
+// site. They run via Promise.all so a dive takes ~the slowest lane (not the
+// sum), and the RESEARCH CAM shows every lane live at once. Stealth flags
+// (agentBrowser.ts) clear the bot-walls. Lanes are best-effort: a blocked or
+// empty source returns [] and the others carry the dive.
+
+export interface ResearchLaneCtx {
+  term: string;
+  symbol?: string;
+  max: number;
+}
+export interface ResearchLane {
+  id: string;
+  label: string;
+  session: string;
+  run: (ab: AgentBrowser, ctx: ResearchLaneCtx) => Promise<AttentionPost[]>;
+}
+/** Cam lifecycle hooks — the collector tells the RESEARCH CAM which lane (and
+ *  its agent-browser session) just went live, so the cam attaches that lane's
+ *  stream and shows it in its own pane. */
+export interface CamLaneHooks {
+  laneStart: (laneId: string, label: string, session: string) => void | Promise<void>;
+  laneAction: (laneId: string, text: string) => void;
+  laneEnd: (laneId: string) => void;
+}
+
+type WebRow = { title: string; snippet: string; href: string };
+
+export const RESEARCH_LANES: ResearchLane[] = [
+  {
+    id: "google",
+    label: "Google",
+    session: "mirofish-lane-google",
+    run: async (ab, { term, max }) => {
+      const out: AttentionPost[] = [];
+      const url = `https://www.google.com/search?q=${encodeURIComponent(`"${term}" meme coin`)}&hl=en&num=20`;
+      if (await ab.open(url)) {
+        await ab.waitFor("div.g, div.tF2Cxc, div.MjjYud");
+        const rows = await ab.evalArray<WebRow>(GOOGLE_EXTRACT, `read google for ${term}`);
+        for (const r of rows.slice(0, max)) {
+          const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
+          if (text) out.push({ text: text.slice(0, 240), platform: platformFromUrl(r.href || "") });
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: "x",
+    label: "X / Twitter",
+    session: "mirofish-lane-x",
+    run: async (ab, { term, symbol }) => {
+      const out: AttentionPost[] = [];
+      // Live search surface — the cam SHOWS X being searched. Extraction is
+      // best-effort (X login-gates the timeline); x.com post links/snippets also
+      // arrive via the Google/Brave/DDG lanes tagged "twitter".
+      const url = `https://x.com/search?q=${encodeURIComponent(`${term} ${symbol ?? ""}`.trim())}&src=typed_query&f=live`;
+      if (await ab.open(url)) {
+        await ab.waitMs(2500);
+        const rows = await ab.evalArray<{ title: string; author: string }>(X_EXTRACT, `read X for ${term}`);
+        for (const r of rows.filter((x) => x.title).slice(0, 12)) {
+          out.push({ text: r.title.slice(0, 240), author: r.author || undefined, platform: "twitter" });
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: "reddit",
+    label: "Reddit",
+    session: "mirofish-lane-reddit",
+    run: async (ab, { term, symbol }) => {
+      const out: AttentionPost[] = [];
+      const url = `https://old.reddit.com/search?q=${encodeURIComponent(`${term} ${symbol ?? ""}`.trim())}&sort=new`;
+      if (await ab.open(url)) {
+        await ab.waitFor(".search-result-link");
+        const rows = await ab.evalArray<{ title: string; author: string }>(OLD_REDDIT_EXTRACT, `read reddit for ${term}`);
+        for (const r of rows.filter((x) => x.title).slice(0, 15)) {
+          out.push({ text: r.title.slice(0, 240), author: r.author || undefined, platform: "reddit" });
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: "brave",
+    label: "Brave",
+    session: "mirofish-lane-brave",
+    run: async (ab, { term }) => {
+      const out: AttentionPost[] = [];
+      const url = `https://search.brave.com/search?q=${encodeURIComponent(`"${term}" meme`)}`;
+      if (await ab.open(url)) {
+        await ab.waitFor(".snippet");
+        const rows = await ab.evalArray<WebRow>(BRAVE_EXTRACT, `read brave for ${term}`);
+        for (const r of rows) {
+          const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
+          if (text) out.push({ text: text.slice(0, 240), platform: platformFromUrl(r.href || "") });
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: "ddg",
+    label: "DuckDuckGo",
+    session: "mirofish-lane-ddg",
+    run: async (ab, { term, max }) => {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${term} meme`)}`;
+      if (!(await ab.open(url))) return [];
+      await ab.waitFor(".result");
+      const rows = await ab.evalArray<WebRow>(DDG_EXTRACT, `read duckduckgo for ${term}`);
+      return parseDdgResults(rows).slice(0, max);
+    },
+  },
+  {
+    id: "bing",
+    label: "Bing",
+    session: "mirofish-lane-bing",
+    run: async (ab, { term, symbol, max }) => {
+      const out: AttentionPost[] = [];
+      // Bing web (most reliable on this network) …
+      const web = `https://www.bing.com/search?q=${encodeURIComponent(`"${term}" ${symbol ?? "meme"}`)}&mkt=en-US&setlang=en&count=20`;
+      if (await ab.open(web)) {
+        await ab.waitFor("li.b_algo");
+        const rows = await ab.evalArray<WebRow>(BING_EXTRACT, `read bing web for ${term}`);
+        out.push(...parseBingResults(rows).slice(0, max));
+      }
+      // … then Bing News (recency + outside-crypto footprint).
+      const news = `https://www.bing.com/news/search?q=${encodeURIComponent(`${term} meme`)}&setlang=en`;
+      if (await ab.open(news)) {
+        await ab.waitFor(".news-card, article");
+        const rows = await ab.evalArray<WebRow>(BING_NEWS_EXTRACT, `read bing news for ${term}`);
+        for (const r of rows) {
+          const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
+          if (text) out.push({ text: text.slice(0, 240), platform: "news" });
+        }
+      }
+      return out;
+    },
+  },
+];
+
+// How many browser lanes run AT ONCE. All lanes at once overlaps Chrome's slow
+// cold-start on this iGPU (waving them instead SERIALIZES the cold-starts and is
+// markedly slower); paired with the concurrent HTTP backbone this is the fastest
+// config measured here AND shows every bot searching simultaneously in the cam.
+const LANE_CONCURRENCY = RESEARCH_LANES.length;
+
+/** Bounded-concurrency pool — preserves item order in the result array. */
+async function runPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
 
 async function collectViaAgentBrowser(
   term: string,
   symbol: string | undefined,
   max: number,
-  onAction?: (text: string) => void,
+  cam?: CamLaneHooks,
 ): Promise<AttentionPost[]> {
-  const ab = new AgentBrowser({ session: "mirofish-research", onAction });
-  const posts: AttentionPost[] = [];
-  type Row = { title: string; snippet: string; href: string };
-
-  // 1) Bing web — the meme + the ticker (en-US market so markup is stable).
-  for (const q of [`"${term}" meme`, symbol ? `${symbol} solana coin` : ""].filter(Boolean).slice(0, 2)) {
-    const url = `https://www.bing.com/search?q=${encodeURIComponent(q)}&mkt=en-US&setlang=en&count=20`;
-    if (!(await ab.open(url))) continue;
-    await ab.waitFor("li.b_algo");
-    const rows = await ab.evalArray<Row>(BING_EXTRACT, `read bing results for ${q}`);
-    posts.push(...parseBingResults(rows).slice(0, max));
-  }
-
-  // 2) Bing News — recency + outside-crypto footprint.
-  {
-    const url = `https://www.bing.com/news/search?q=${encodeURIComponent(`${term} meme`)}&setlang=en`;
-    if (await ab.open(url)) {
-      await ab.waitFor(".news-card, article");
-      const rows = await ab.evalArray<Row>(BING_NEWS_EXTRACT, `read bing news for ${term}`);
-      for (const r of rows) {
-        const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
-        if (text) posts.push({ text: text.slice(0, 240), platform: "news" });
-      }
+  // Fan out with a concurrency cap: up to LANE_CONCURRENCY lanes search at once,
+  // each in its own browser session/stream; the rest queue and start as slots free.
+  const results = await runPool(RESEARCH_LANES, LANE_CONCURRENCY, async (lane) => {
+    const ab = new AgentBrowser({ session: lane.session, onAction: (t) => cam?.laneAction(lane.id, t) });
+    try {
+      // Launch THIS lane's daemon first (sole launcher), THEN let the cam attach
+      // its stream — so the cam never races the daemon launch.
+      await ab.warmup();
+      await cam?.laneStart(lane.id, lane.label, lane.session);
+      return await lane.run(ab, { term, symbol, max });
+    } catch (e) {
+      log.warn(`research lane ${lane.id} failed: ${(e as Error).message}`);
+      return [] as AttentionPost[];
+    } finally {
+      cam?.laneEnd(lane.id);
     }
-  }
-
-  // 3) old.reddit — community talk (now clears the challenge with stealth flags).
-  {
-    const url = `https://old.reddit.com/search?q=${encodeURIComponent(`${term} ${symbol ?? ""}`.trim())}&sort=new`;
-    if (await ab.open(url)) {
-      await ab.waitFor(".search-result-link");
-      const rows = await ab.evalArray<{ title: string; author: string }>(OLD_REDDIT_EXTRACT, "read reddit results");
-      for (const r of rows.filter((x) => x.title).slice(0, 15)) {
-        posts.push({ text: r.title.slice(0, 240), author: r.author || undefined, platform: "reddit" });
-      }
-    }
-  }
-
-  // 4) Brave — diverse web/social result set (stealth flags clear the captcha).
-  {
-    const url = `https://search.brave.com/search?q=${encodeURIComponent(`"${term}" meme`)}`;
-    if (await ab.open(url)) {
-      await ab.waitFor(".snippet");
-      const rows = await ab.evalArray<Row>(BRAVE_EXTRACT, `read brave for ${term}`);
-      for (const r of rows) {
-        const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
-        if (text) posts.push({ text: text.slice(0, 240), platform: platformFromUrl(r.href || "") });
-      }
-    }
-  }
-
-  // 5) DuckDuckGo (html) — surfaces tiktok/youtube/x links (now reachable).
-  {
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${term} meme`)}`;
-    if (await ab.open(url)) {
-      await ab.waitFor(".result");
-      const rows = await ab.evalArray<Row>(DDG_EXTRACT, `read duckduckgo for ${term}`);
-      posts.push(...parseDdgResults(rows).slice(0, max));
-    }
-  }
-
-  onAction?.(`dive done — ${posts.length} posts collected`);
+  });
+  const posts = results.flat();
+  cam?.laneAction("all", `dive done — ${posts.length} posts from ${RESEARCH_LANES.length} lanes`);
   return posts;
 }
 
@@ -305,21 +427,27 @@ export async function collectEvidence(
   const platforms = new Set<string>();
   if (!term) return { mint: coin.mint, symbol: coin.symbol, name: coin.name, query: "", posts, platforms: [], links: [], fetchedAt: now };
 
-  // 1) Google News RSS (reliable) — real-world / news footprint.
-  for (const q of [`${term} meme`, coin.symbol ? `${coin.symbol} coin` : ""].filter(Boolean)) {
-    const news = await fetchGoogleNews(q);
-    if (news.length) {
-      posts.push(...news);
-      platforms.add("news");
+  // 1+2) HTTP BACKBONE — Google News RSS + Wikipedia. These are plain fetches
+  // (no Chrome), so we run them CONCURRENTLY with the browser lanes below instead
+  // of blocking ~25-30s in front of them. Kicked off here, awaited at the end.
+  const backbone = (async (): Promise<AttentionPost[]> => {
+    const out: AttentionPost[] = [];
+    const newsBatches = await Promise.all(
+      [`${term} meme`, coin.symbol ? `${coin.symbol} coin` : ""].filter(Boolean).map((q) => fetchGoogleNews(q)),
+    );
+    for (const news of newsBatches) {
+      if (news.length) {
+        out.push(...news);
+        platforms.add("news");
+      }
     }
-  }
-
-  // 2) Wikipedia (reliable) — a real, non-crypto article = strong outside-crypto signal.
-  const wiki = await fetchWikipedia(term);
-  if (wiki.matched && !wiki.isCrypto && wiki.title) {
-    posts.push({ text: `Wikipedia: ${wiki.title} — ${wiki.snippet ?? ""}`.slice(0, 240), platform: "wikipedia" });
-    platforms.add("wikipedia");
-  }
+    const wiki = await fetchWikipedia(term);
+    if (wiki.matched && !wiki.isCrypto && wiki.title) {
+      out.push({ text: `Wikipedia: ${wiki.title} — ${wiki.snippet ?? ""}`.slice(0, 240), platform: "wikipedia" });
+      platforms.add("wikipedia");
+    }
+    return out;
+  })();
 
   // 3) Social/search via real browser (opt-in). Primary driver: agent-browser
   //    (fast Rust CLI; streams to the dashboard RESEARCH CAM). Playwright stays
@@ -329,7 +457,7 @@ export async function collectEvidence(
     let collected = false;
     if (opts.driver !== "playwright" && (await AgentBrowser.available())) {
       try {
-        for (const p of await collectViaAgentBrowser(term, coin.symbol, max, opts.onAction)) {
+        for (const p of await collectViaAgentBrowser(term, coin.symbol, max, opts.cam)) {
           posts.push(p);
           platforms.add(p.platform);
         }
@@ -376,5 +504,19 @@ export async function collectEvidence(
     }
   }
 
-  return { mint: coin.mint, symbol: coin.symbol, name: coin.name, query: term, posts, platforms: [...platforms], links: [], fetchedAt: now };
+  // Merge the HTTP backbone (it ran concurrently with the browser lanes).
+  posts.push(...(await backbone.catch(() => [])));
+
+  // Dedup — different search engines surface the same article/post (and some
+  // localize it), so collapse on platform + normalized text.
+  const deduped: AttentionPost[] = [];
+  const seen = new Set<string>();
+  for (const p of posts) {
+    const key = `${p.platform}|${p.text.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 90)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(p);
+  }
+
+  return { mint: coin.mint, symbol: coin.symbol, name: coin.name, query: term, posts: deduped, platforms: [...platforms], links: [], fetchedAt: now };
 }

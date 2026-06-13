@@ -71,9 +71,11 @@ export class AgentBrowser {
     return rawExec(["--session", this.session, ...args], this.timeoutMs);
   }
 
-  /** Navigate (ignoring this machine's TLS-inspection cert errors — read-only). */
+  /** Navigate. (TLS-inspection cert errors are bypassed via the env flag set in
+   *  rawExec — NOT a per-command --ignore-https-errors, which the daemon rejects
+   *  once it's already running: "ignored: daemon already running".) */
   async open(url: string): Promise<boolean> {
-    const r = await this.exec(["--ignore-https-errors", "open", url, "--json"], `open ${shortUrl(url)}`);
+    const r = await this.exec(["open", url, "--json"], `open ${shortUrl(url)}`);
     if (!r.ok) return false;
     try {
       return JSON.parse(r.out).success === true;
@@ -90,6 +92,13 @@ export class AgentBrowser {
 
   async waitMs(ms: number): Promise<void> {
     await this.exec(["wait", String(ms)]);
+  }
+
+  /** Launch this session's daemon quietly (about:blank) so exactly ONE caller
+   *  owns the launch — the cam then attaches its stream to the already-running
+   *  daemon instead of racing it. No action note (keeps the ticker clean). */
+  async warmup(): Promise<void> {
+    await rawExec(["--session", this.session, "open", "about:blank", "--json"], this.timeoutMs);
   }
 
   /** Run an extraction script that returns JSON.stringify(...) — parsed here.
@@ -159,6 +168,12 @@ export class AgentBrowser {
   async reset(): Promise<void> {
     await rawExec(["--session", this.session, "close"], 10_000);
   }
+
+  /** Close EVERY session's browser (boot cleanup) so all research lanes relaunch
+   *  fresh with the stealth env, regardless of leftover daemons from a prior run. */
+  static async resetAll(): Promise<void> {
+    await rawExec(["close", "--all"], 12_000);
+  }
 }
 
 function shortUrl(u: string): string {
@@ -183,6 +198,9 @@ function rawExec(args: string[], timeoutMs: number): Promise<AbExec> {
           AGENT_BROWSER_USER_AGENT: STEALTH_UA,
           AGENT_BROWSER_ARGS: STEALTH_ARGS,
           AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "1",
+          // Cap selector/wait timeouts so a missing element fails fast (15s) and
+          // the lane proceeds to extract whatever DID load, instead of stalling 25s.
+          AGENT_BROWSER_DEFAULT_TIMEOUT: "15000",
         },
       },
       (err, stdout, stderr) => {
