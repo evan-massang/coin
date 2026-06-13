@@ -174,13 +174,17 @@ async function fetchWikipedia(term: string): Promise<WikiResult> {
 }
 
 // ── agent-browser collection (primary driver) ───────────────────────────────
-// Sources verified reachable on this network 2026-06-12: Bing web + Bing News
-// (DDG is ISP-blocked, Brave captcha-walls headless traffic). old.reddit stays
-// best-effort. All steps are open→wait→read; nothing is ever clicked or typed.
+// Sources verified reachable on this network 2026-06-12 with STEALTH launch
+// flags (_probe_stealth.mjs): Bing web + Bing News + old.reddit + Brave + DDG —
+// vanilla CDP hit bot-challenges on Brave/Reddit/DDG (0 results), the
+// anti-detection flags clear them (23/22/10 results). All steps are
+// open→wait→read; nothing is ever clicked or typed.
 
 const BING_EXTRACT = `JSON.stringify([...document.querySelectorAll('li.b_algo')].slice(0,12).map(r=>({title:(r.querySelector('h2')?.textContent||'').trim(),href:r.querySelector('h2 a, a')?.href||'',snippet:(r.querySelector('.b_caption p, .b_lineclamp2, p')?.textContent||'').trim().slice(0,160)})))`;
 const BING_NEWS_EXTRACT = `JSON.stringify([...document.querySelectorAll('.news-card, .newsitem, article')].slice(0,12).map(r=>({title:(r.querySelector('a.title, .title, a')?.textContent||'').trim(),href:r.querySelector('a.title, a')?.href||'',snippet:(r.querySelector('.snippet, p')?.textContent||'').trim().slice(0,160)})))`;
 const OLD_REDDIT_EXTRACT = `JSON.stringify([...document.querySelectorAll('.search-result-link')].slice(0,15).map(r=>({title:(r.querySelector('.search-title')?.textContent||'').trim(),author:(r.querySelector('.author')?.textContent||'').trim()})))`;
+const BRAVE_EXTRACT = `JSON.stringify([...document.querySelectorAll('.snippet[data-type=web], .snippet')].slice(0,12).map(r=>({title:(r.querySelector('.title, .snippet-title')?.textContent||'').trim(),href:r.querySelector('a')?.href||'',snippet:(r.querySelector('.snippet-description, .snippet-content p, p')?.textContent||'').trim().slice(0,160)})))`;
+const DDG_EXTRACT = `JSON.stringify([...document.querySelectorAll('.result')].slice(0,12).map(r=>({title:(r.querySelector('.result__a')?.textContent||'').trim(),href:r.querySelector('.result__a')?.getAttribute('href')||'',snippet:(r.querySelector('.result__snippet')?.textContent||'').trim().slice(0,160)})))`;
 
 async function collectViaAgentBrowser(
   term: string,
@@ -197,7 +201,7 @@ async function collectViaAgentBrowser(
     const url = `https://www.bing.com/search?q=${encodeURIComponent(q)}&mkt=en-US&setlang=en&count=20`;
     if (!(await ab.open(url))) continue;
     await ab.waitFor("li.b_algo");
-    const rows = (await ab.evalJson<Row[]>(BING_EXTRACT, `read bing results for ${q}`)) ?? [];
+    const rows = await ab.evalArray<Row>(BING_EXTRACT, `read bing results for ${q}`);
     posts.push(...parseBingResults(rows).slice(0, max));
   }
 
@@ -206,7 +210,7 @@ async function collectViaAgentBrowser(
     const url = `https://www.bing.com/news/search?q=${encodeURIComponent(`${term} meme`)}&setlang=en`;
     if (await ab.open(url)) {
       await ab.waitFor(".news-card, article");
-      const rows = (await ab.evalJson<Row[]>(BING_NEWS_EXTRACT, `read bing news for ${term}`)) ?? [];
+      const rows = await ab.evalArray<Row>(BING_NEWS_EXTRACT, `read bing news for ${term}`);
       for (const r of rows) {
         const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
         if (text) posts.push({ text: text.slice(0, 240), platform: "news" });
@@ -214,15 +218,38 @@ async function collectViaAgentBrowser(
     }
   }
 
-  // 3) old.reddit — community talk (best-effort; may be challenge-walled).
+  // 3) old.reddit — community talk (now clears the challenge with stealth flags).
   {
     const url = `https://old.reddit.com/search?q=${encodeURIComponent(`${term} ${symbol ?? ""}`.trim())}&sort=new`;
     if (await ab.open(url)) {
       await ab.waitFor(".search-result-link");
-      const rows = (await ab.evalJson<Array<{ title: string; author: string }>>(OLD_REDDIT_EXTRACT, "read reddit results")) ?? [];
+      const rows = await ab.evalArray<{ title: string; author: string }>(OLD_REDDIT_EXTRACT, "read reddit results");
       for (const r of rows.filter((x) => x.title).slice(0, 15)) {
         posts.push({ text: r.title.slice(0, 240), author: r.author || undefined, platform: "reddit" });
       }
+    }
+  }
+
+  // 4) Brave — diverse web/social result set (stealth flags clear the captcha).
+  {
+    const url = `https://search.brave.com/search?q=${encodeURIComponent(`"${term}" meme`)}`;
+    if (await ab.open(url)) {
+      await ab.waitFor(".snippet");
+      const rows = await ab.evalArray<Row>(BRAVE_EXTRACT, `read brave for ${term}`);
+      for (const r of rows) {
+        const text = [r.title, r.snippet].filter(Boolean).join(" — ").trim();
+        if (text) posts.push({ text: text.slice(0, 240), platform: platformFromUrl(r.href || "") });
+      }
+    }
+  }
+
+  // 5) DuckDuckGo (html) — surfaces tiktok/youtube/x links (now reachable).
+  {
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${term} meme`)}`;
+    if (await ab.open(url)) {
+      await ab.waitFor(".result");
+      const rows = await ab.evalArray<Row>(DDG_EXTRACT, `read duckduckgo for ${term}`);
+      posts.push(...parseDdgResults(rows).slice(0, max));
     }
   }
 

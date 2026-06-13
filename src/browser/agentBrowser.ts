@@ -12,7 +12,19 @@ import { log } from "../util/logger.js";
 // get / stream / close. No click, no fill, no auth, no cookies, no upload —
 // the engine reads public pages, it never acts on them. Eval is used solely
 // for DOM extraction (the scripts live in researchAgent.ts).
+//
+// STEALTH: a real Chrome User-Agent + dropping the blink AutomationControlled
+// flag, applied via env to every launch. Probe 2026-06-12 (_probe_stealth.mjs)
+// proved this alone clears the bot-challenges that vanilla CDP triggers — Brave
+// 0→23, old.reddit 0→22, DuckDuckGo 0→10 results — so we did NOT need a Python
+// anti-detection framework (SeleniumBase UC mode). These are launch flags: the
+// daemon reads them when it first launches the browser for a session, so callers
+// reset() the session once at boot to clear any pre-stealth daemon.
 // ─────────────────────────────────────────────────────────────────────────────
+
+const STEALTH_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const STEALTH_ARGS = "--disable-blink-features=AutomationControlled,--disable-features=IsolateOrigins,site-per-process";
 
 export interface AbExec {
   ok: boolean;
@@ -80,19 +92,44 @@ export class AgentBrowser {
     await this.exec(["wait", String(ms)]);
   }
 
-  /** Run an extraction script that returns JSON.stringify(...) — parsed here. */
+  /** Run an extraction script that returns JSON.stringify(...) — parsed here.
+   *  agent-browser wraps the eval result inconsistently across versions/pages
+   *  ({data}, {data:{result}}, {data:{value}}, or the bare value), and on a
+   *  challenge/blank page may return a non-JSON string — so we unwrap defensively
+   *  and the caller (evalArray) coerces. */
   async evalJson<T>(js: string, note?: string): Promise<T | undefined> {
     const r = await this.exec(["eval", js, "--json"], note);
     if (!r.ok) return undefined;
+    let data: unknown;
     try {
-      const envelope = JSON.parse(r.out) as { success?: boolean; data?: unknown };
-      if (envelope.success !== true) return undefined;
-      const data = envelope.data;
-      if (typeof data === "string") return JSON.parse(data) as T;
-      return data as T;
+      const envelope = JSON.parse(r.out) as { success?: boolean; data?: unknown; result?: unknown; value?: unknown };
+      if (envelope.success === false) return undefined;
+      data = envelope.data ?? envelope.result ?? envelope.value ?? envelope;
+      // Unwrap one more level: { result } / { value } nested under data.
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        const inner = data as { result?: unknown; value?: unknown };
+        if (inner.result !== undefined) data = inner.result;
+        else if (inner.value !== undefined) data = inner.value;
+      }
     } catch {
       return undefined;
     }
+    // The eval payload is itself a JSON.stringify(...) string → parse once more.
+    if (typeof data === "string") {
+      try {
+        return JSON.parse(data) as T;
+      } catch {
+        return undefined; // a challenge page / plain-text response, not our JSON
+      }
+    }
+    return data as T;
+  }
+
+  /** evalJson coerced to an array — the extraction boundary never yields a
+   *  non-iterable (prevents the "rows is not iterable" collector crash). */
+  async evalArray<T>(js: string, note?: string): Promise<T[]> {
+    const v = await this.evalJson<unknown>(js, note);
+    return Array.isArray(v) ? (v as T[]) : [];
   }
 
   async currentUrl(): Promise<string> {
@@ -116,6 +153,12 @@ export class AgentBrowser {
   async close(): Promise<void> {
     await this.exec(["close"], "close session");
   }
+
+  /** Force the next launch to pick up the stealth env (call once at boot — the
+   *  daemon captures launch flags only when it first opens the browser). */
+  async reset(): Promise<void> {
+    await rawExec(["--session", this.session, "close"], 10_000);
+  }
 }
 
 function shortUrl(u: string): string {
@@ -128,8 +171,20 @@ function rawExec(args: string[], timeoutMs: number): Promise<AbExec> {
       BIN.file,
       args,
       // shell only for the PATH-shim fallback (npm .cmd); args are engine-built,
-      // never user input. windowsHide keeps the daemon spawn invisible.
-      { timeout: timeoutMs, shell: BIN.shell, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      // never user input. windowsHide keeps the daemon spawn invisible. The
+      // stealth env is read by the daemon when it launches the browser.
+      {
+        timeout: timeoutMs,
+        shell: BIN.shell,
+        windowsHide: true,
+        maxBuffer: 8 * 1024 * 1024,
+        env: {
+          ...process.env,
+          AGENT_BROWSER_USER_AGENT: STEALTH_UA,
+          AGENT_BROWSER_ARGS: STEALTH_ARGS,
+          AGENT_BROWSER_IGNORE_HTTPS_ERRORS: "1",
+        },
+      },
       (err, stdout, stderr) => {
         if (err) {
           log.warn(`agent-browser ${args.slice(0, 3).join(" ")} failed: ${String(stderr || err.message).slice(0, 160)}`);

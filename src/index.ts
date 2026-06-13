@@ -28,7 +28,11 @@ async function main(): Promise<void> {
 
   // RESEARCH CAM — the operator's live CCTV view of the research browser.
   // Same agent-browser session the collector uses, so the stream shows real dives.
-  svc.cam = new BrowserCam(svc.hub, new AgentBrowser({ session: "mirofish-research" }));
+  const researchBrowser = new AgentBrowser({ session: "mirofish-research" });
+  // Clear any pre-stealth daemon so the next launch picks up the anti-detection
+  // env (UA + dropped AutomationControlled flag) — see agentBrowser.ts STEALTH.
+  void researchBrowser.reset();
+  svc.cam = new BrowserCam(svc.hub, researchBrowser);
 
   // Initialize the paper sim wallet if paper trading is enabled.
   if (svc.settings.get("paperEnabled")) {
