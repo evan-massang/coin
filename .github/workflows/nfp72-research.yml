@@ -24,23 +24,61 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install research dependencies
+      - name: Install pinned research dependencies
         run: >-
           python -m pip install --disable-pip-version-check
-          pandas numpy scipy scikit-learn requests joblib python-dateutil
+          pandas==3.0.5 numpy==2.5.1 scipy==1.18.0 scikit-learn==1.9.0
+          requests==2.34.2 joblib==1.5.3 python-dateutil==2.9.0.post0
 
       - name: Decode locked research program
         shell: bash
         run: |
           base64 -d scripts/research/nfp72_remote.py.gz.b64 | gzip -d > /tmp/nfp72_remote.py
           python -m py_compile /tmp/nfp72_remote.py
-          sha256sum /tmp/nfp72_remote.py
+          sha256sum /tmp/nfp72_remote.py > /tmp/program_sha256_before_patch.txt
+
+      - name: Repair report-only split propagation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/nfp72_remote.py')
+          source = path.read_text(encoding='utf-8')
+          needle = '    write_report(frame, result)\n'
+          replacement = (
+              '    frame["split"] = ["development"] * DEV_N + '
+              '["validation"] * VAL_N + ["test"] * TEST_N\n'
+              '    write_report(frame, result)\n'
+          )
+          if source.count(needle) != 1:
+              raise SystemExit(f'expected exactly one report call, found {source.count(needle)}')
+          path.write_text(source.replace(needle, replacement), encoding='utf-8')
+          PY
+          python -m py_compile /tmp/nfp72_remote.py
+          sha256sum /tmp/nfp72_remote.py > /tmp/program_sha256_after_report_patch.txt
 
       - name: Build dataset, lock model, and score untouched test
         env:
           NFP72_OUT: nfp72_artifacts
           PYTHONUNBUFFERED: "1"
-        run: python /tmp/nfp72_remote.py
+          PYTHONHASHSEED: "0"
+        shell: bash
+        run: |
+          set -o pipefail
+          python /tmp/nfp72_remote.py 2>&1 | tee nfp72_run.log
+
+      - name: Preserve run provenance
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p nfp72_artifacts
+          cp nfp72_run.log nfp72_artifacts/run.log 2>/dev/null || true
+          cp /tmp/program_sha256_before_patch.txt nfp72_artifacts/ 2>/dev/null || true
+          cp /tmp/program_sha256_after_report_patch.txt nfp72_artifacts/ 2>/dev/null || true
+          {
+            python --version
+            python -m pip freeze
+          } > nfp72_artifacts/environment.txt
 
       - name: Upload complete research artifact
         if: always()
