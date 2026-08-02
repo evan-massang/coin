@@ -43,17 +43,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat scripts/research/nfp72_news_parts/source_*.part \
-            | base64 --decode | gzip --decompress > /tmp/nfp72_news_remote.py
-          cat scripts/research/nfp72_news_parts/ledger_*.part \
-            > scripts/research/nfp72_feature_ledger.csv.gz.b64
+          wc -c scripts/research/nfp72_news_parts/source_*.part
+          cat scripts/research/nfp72_news_parts/source_*.part > /tmp/nfp72_news_remote.py.gz.b64
+          test "$(wc -c < /tmp/nfp72_news_remote.py.gz.b64)" = "19468"
+          echo '13b530e42108e53820c237a2098a6fd51609cead4abffb300dc6a91895b74c79  /tmp/nfp72_news_remote.py.gz.b64' | sha256sum -c -
+          base64 --decode /tmp/nfp72_news_remote.py.gz.b64 | gzip --decompress > /tmp/nfp72_news_remote.py
+
+          wc -c scripts/research/nfp72_news_parts/ledger_*.part
+          cat scripts/research/nfp72_news_parts/ledger_*.part > scripts/research/nfp72_feature_ledger.csv.gz.b64
+          test "$(wc -c < scripts/research/nfp72_feature_ledger.csv.gz.b64)" = "28968"
           python -m py_compile /tmp/nfp72_news_remote.py
-          base64 --decode scripts/research/nfp72_feature_ledger.csv.gz.b64 \
-            | gzip --decompress > /tmp/NFP72_FEATURE_LEDGER.csv
+          base64 --decode scripts/research/nfp72_feature_ledger.csv.gz.b64 | gzip --decompress > /tmp/NFP72_FEATURE_LEDGER.csv
           rows=$(python -c "import pandas as pd; print(len(pd.read_csv('/tmp/NFP72_FEATURE_LEDGER.csv')))")
           test "$rows" = "72"
-          sha256sum /tmp/nfp72_news_remote.py /tmp/NFP72_FEATURE_LEDGER.csv \
-            | tee /tmp/input_sha256.txt
+          sha256sum /tmp/nfp72_news_remote.py /tmp/NFP72_FEATURE_LEDGER.csv | tee /tmp/input_sha256.txt
 
       - name: Build point-in-time news ledger and run forward experiment
         env:
