@@ -51,11 +51,7 @@ jobs:
           python -m py_compile /tmp/nfp72_news_remote.py
           base64 --decode scripts/research/nfp72_feature_ledger.csv.gz.b64 \
             | gzip --decompress > /tmp/NFP72_FEATURE_LEDGER.csv
-          rows=$(python - <<'PY'
-import pandas as pd
-print(len(pd.read_csv('/tmp/NFP72_FEATURE_LEDGER.csv')))
-PY
-          )
+          rows=$(python -c "import pandas as pd; print(len(pd.read_csv('/tmp/NFP72_FEATURE_LEDGER.csv')))")
           test "$rows" = "72"
           sha256sum /tmp/nfp72_news_remote.py /tmp/NFP72_FEATURE_LEDGER.csv \
             | tee /tmp/input_sha256.txt
