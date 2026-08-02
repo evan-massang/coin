@@ -1,0 +1,52 @@
+name: Temporary NFP72 research
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/research/nfp72_remote.py.gz.b64"
+      - ".github/workflows/nfp72-research.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nfp72:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out temporary research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install research dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check
+          pandas numpy scipy scikit-learn requests joblib python-dateutil
+
+      - name: Decode locked research program
+        shell: bash
+        run: |
+          base64 -d scripts/research/nfp72_remote.py.gz.b64 | gzip -d > /tmp/nfp72_remote.py
+          python -m py_compile /tmp/nfp72_remote.py
+          sha256sum /tmp/nfp72_remote.py
+
+      - name: Build dataset, lock model, and score untouched test
+        env:
+          NFP72_OUT: nfp72_artifacts
+          PYTHONUNBUFFERED: "1"
+        run: python /tmp/nfp72_remote.py
+
+      - name: Upload complete research artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfp72-artifacts
+          path: nfp72_artifacts/
+          if-no-files-found: error
+          retention-days: 3
