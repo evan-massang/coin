@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat scripts/research/nfp72_news_parts/script_*.part \
+          cat scripts/research/nfp72_news_parts/source_*.part \
             | base64 --decode | gzip --decompress > /tmp/nfp72_news_remote.py
           cat scripts/research/nfp72_news_parts/ledger_*.part \
             > scripts/research/nfp72_feature_ledger.csv.gz.b64
