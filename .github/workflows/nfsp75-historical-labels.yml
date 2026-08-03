@@ -1,0 +1,74 @@
+name: Temporary NFSP75 historical XAU labels
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/nfsp75-historical-labels.yml'
+      - 'scripts/research/build_nfsp75_tick_labels.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependency
+        run: python -m pip install requests==2.32.3
+
+      - name: Download point-in-time macro event archive
+        shell: bash
+        run: |
+          mkdir -p nfsp75_artifacts/cache
+          curl --fail --location --retry 4 \
+            https://raw.githubusercontent.com/superpilot69/fred-us-macro-open-data/main/data/fred-us-macro-events.json \
+            --output nfsp75_artifacts/fred-us-macro-events.json
+          sha256sum nfsp75_artifacts/fred-us-macro-events.json | tee nfsp75_artifacts/macro_sha256.txt
+
+      - name: Build 2008-2019 first-barrier labels
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/research/build_nfsp75_tick_labels.py \
+            --macro-json nfsp75_artifacts/fred-us-macro-events.json \
+            --out nfsp75_artifacts/NFSP75_XAU_LABELS_2008_2019.csv \
+            --cache-dir nfsp75_artifacts/cache \
+            --from-date 2008-03-01 \
+            --to-date 2019-12-31 \
+            --barrier-pct 0.10 \
+            2>&1 | tee nfsp75_artifacts/run.log
+
+      - name: Verify output
+        shell: bash
+        run: |
+          python - <<'PY'
+          import csv
+          from collections import Counter
+          path='nfsp75_artifacts/NFSP75_XAU_LABELS_2008_2019.csv'
+          with open(path, newline='') as f: rows=list(csv.DictReader(f))
+          print('rows', len(rows))
+          print('h60', Counter(r.get('h60_label') for r in rows))
+          assert len(rows) >= 130, len(rows)
+          assert sum(r.get('h60_label') in {'UP','DOWN','FLAT','CLOSED'} for r in rows) == len(rows)
+          PY
+          sha256sum scripts/research/build_nfsp75_tick_labels.py \
+            nfsp75_artifacts/NFSP75_XAU_LABELS_2008_2019.csv \
+            | tee nfsp75_artifacts/output_sha256.txt
+
+      - name: Upload research artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfsp75-historical-labels
+          path: nfsp75_artifacts/
+          if-no-files-found: error
+          retention-days: 5
